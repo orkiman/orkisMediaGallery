@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Viewer</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: #f0f0f0;
+            overflow-x: hidden;
+        }
+        .header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            padding: 10px;
+            text-align: center;
+            background-color: #25ca4e;
+            color: white;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+            z-index: 2;
+        }
+        .header a {
+            color: white;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        .image-container {
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            width: 100%;
+            height: calc(100% - 60px);
+            background-color: pink;
+            overflow: auto;
+        }
+        .image-container img {
+            max-width: 100%;
+            max-height: 100%;
+            width: auto;
+            height: auto;
+            user-select: none;
+            cursor: pointer;
+            transition: transform 0.3s ease;
+            object-fit: contain;
+        }
+        .image-container img.full-size {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: auto;
+            height: auto;
+            max-width: none;
+            max-height: none;
+            object-fit: none;
+            z-index: 3;
+        }
+        .nav-arrow {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 50px;
+            height: 50px;
+            background-color: rgba(0, 0, 0, 0.5);
+            color: white;
+            font-size: 24px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            z-index: 1;
+        }
+        .nav-arrow.prev {
+            left: 10px;
+        }
+        .nav-arrow.next {
+            right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <a href="/">Home</a>
+    </div>
+    <div class="image-container">
+        <div class="nav-arrow prev" onclick="navigate('{{ .PrevPath }}')">&lt;</div>
+        <img id="currentImage" src="{{ .ImagePath }}" alt="Full Size Image">
+        <div class="nav-arrow next" onclick="navigate('{{ .NextPath }}')">&gt;</div>
+    </div>
+
+    <script>
+        let startX, startY;
+
+        function toggleFullSize(event) {
+            event.stopPropagation();
+            let img = document.getElementById('currentImage');
+            img.classList.toggle('full-size');
+        }
+
+        function navigate(path) {
+            if (path && !document.getElementById('currentImage').classList.contains('full-size')) {
+                window.location.href = path;
+            }
+        }
+
+        function touchStart(event) {
+            startX = event.touches[0].clientX;
+            startY = event.touches[0].clientY;
+        }
+
+        function touchEnd(event) {
+            if (document.getElementById('currentImage').classList.contains('full-size')) return;
+            let endX = event.changedTouches[0].clientX;
+            let endY = event.changedTouches[0].clientY;
+            let deltaX = endX - startX;
+            let deltaY = endY - startY;
+
+            const minSwipeDistance = 50;
+
+            if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > minSwipeDistance) {
+                if (deltaX > 0) {
+                    navigate('{{ .NextPath }}');
+                } else {
+                    navigate('{{ .PrevPath }}');
+                }
+            }
+        }
+
+        document.getElementById('currentImage').addEventListener('click', toggleFullSize);
+        document.getElementById('currentImage').addEventListener('touchstart', touchStart);
+        document.getElementById('currentImage').addEventListener('touchend', touchEnd);
+    </script>
+</body>
+</html>

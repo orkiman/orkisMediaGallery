@@ -1,0 +1,24 @@
+iterate files in folders.
+move heic to outer folder and replace it with jpg
+create thumbnails
+
+
+
+this is my dynamic dns : https://dynv6.com/ 
+my url : https://orkiman.v6.rocks
+
+this is how created ssl certificates using 
+pip install certbot
+certbot certonly --standalone -d orkiman.v6.rocks
+
+general planning:
+all photos will be placed inside the photos directory.
+
+server start: all photos directory will be scanned:
+1. heic files will be converted to jpg, placed in the heic directory and thumbnail will be created for the new jpg
+2. thumbnails will be created and placed in the thumbnails directory for each photo and video
+* concurently
+
+albums:
+each photo can be added to multiple albums
+the information about the album will be stored in a data file (choose format)
