@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Image Viewer</title>
     <style>
-        body, html {
+        body,
+        html {
             margin: 0;
             padding: 0;
             height: 100%;
@@ -17,6 +19,7 @@
             background-color: #f0f0f0;
             overflow-x: hidden;
         }
+
         .header {
             position: fixed;
             top: 0;
@@ -29,11 +32,13 @@
             box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
             z-index: 2;
         }
+
         .header a {
             color: white;
             text-decoration: none;
             font-weight: bold;
         }
+
         .image-container {
             position: relative;
             display: flex;
@@ -44,6 +49,7 @@
             background-color: pink;
             overflow: auto;
         }
+
         .image-container img {
             max-width: 100%;
             max-height: 100%;
@@ -54,6 +60,7 @@
             transition: transform 0.3s ease;
             object-fit: contain;
         }
+
         .image-container img.full-size {
             position: absolute;
             top: 0;
@@ -65,6 +72,7 @@
             object-fit: none;
             z-index: 3;
         }
+
         .nav-arrow {
             position: absolute;
             top: 50%;
@@ -80,14 +88,17 @@
             cursor: pointer;
             z-index: 1;
         }
+
         .nav-arrow.prev {
             left: 10px;
         }
+
         .nav-arrow.next {
             right: 10px;
         }
     </style>
 </head>
+
 <body>
     <div class="header">
         <a href="/">Home</a>
@@ -99,13 +110,89 @@
     </div>
 
     <script>
-        let startX, startY;
+        let startX, startY, clickX, clickY;
+
+
+        let offsetX, offsetY, naturalWidth, targetX, targetY, containerWidth,  displayWidth; // Declare offsetX and offsetY outside the function
 
         function toggleFullSize(event) {
             event.stopPropagation();
             let img = document.getElementById('currentImage');
+            // img.classList.toggle('full-size');
+
+            // Get the click coordinates relative to the image
+            // if (!img.classList.contains('full-size')) {
+                clickX = event.offsetX;
+                clickY = event.offsetY;
+            // }
+            // Get the natural dimensions of the image
+            naturalWidth = img.naturalWidth;
+            let naturalHeight = img.naturalHeight;
+
+            // Get the container dimensions
+            let container = img.parentNode;
+            containerWidth = container.offsetWidth;
+            let containerHeight = container.offsetHeight;
+
+            // Calculate the display dimensions of the bounded image
+            let displayHeight;
+            if (naturalWidth / naturalHeight > containerWidth / containerHeight) {
+                displayWidth = containerWidth;
+                displayHeight = (naturalHeight / naturalWidth) * containerWidth;
+            } else {
+                displayWidth = (naturalWidth / naturalHeight) * containerHeight;
+                displayHeight = containerHeight;
+            }
+
+            targetX = clickX / displayWidth;
+            targetY = clickY / displayHeight;
+
+            if (!img.classList.contains('full-size')) {
+                offsetX = naturalWidth * targetX - containerWidth / 2;
+                offsetY = naturalHeight * targetY - containerHeight / 2;
+            } else {
+                offsetX = naturalWidth * targetX - displayWidth / 2;
+                offsetY = naturalHeight * targetY - displayHeight / 2;
+            }
+
+            // Create a debug text element
+            let debugText = document.createElement('div');
+            debugText.style.position = 'absolute';
+            debugText.style.top = '10px';
+            debugText.style.left = '10px';
+            debugText.style.color = 'white';
+            debugText.style.background = 'rgba(0, 0, 0, 0.5)';
+            debugText.style.padding = '5px';
+            debugText.style.borderRadius = '5px';
+            debugText.style.fontSize = '12px';
+
+            // Set the debug text content
+            debugText.innerHTML = `
+                <b>Debug values:</b><br>
+                clickX: ${clickX}<br>
+                clickY: ${clickY}<br>
+                naturalWidth: ${naturalWidth}<br>
+                naturalHeight: ${naturalHeight}<br>
+                containerWidth: ${containerWidth}<br>
+                containerHeight: ${containerHeight}<br>
+                displayWidth: ${displayWidth}<br>
+                displayHeight: ${displayHeight}<br>
+                targetX: ${targetX}<br>
+                targetY: ${targetY}<br>
+                offsetX: ${offsetX}<br>
+                offsetY: ${offsetY}
+            `;
             img.classList.toggle('full-size');
+            // Add the debug text element to the image
+            img.parentNode.appendChild(debugText);
+
+            // Scroll the container to the calculated offset
+            container.scrollLeft = offsetX;
+            container.scrollTop = offsetY;
+            
         }
+
+
 
         function navigate(path) {
             if (path && !document.getElementById('currentImage').classList.contains('full-size')) {
@@ -139,6 +226,8 @@
         document.getElementById('currentImage').addEventListener('click', toggleFullSize);
         document.getElementById('currentImage').addEventListener('touchstart', touchStart);
         document.getElementById('currentImage').addEventListener('touchend', touchEnd);
+
     </script>
 </body>
+
 </html>
