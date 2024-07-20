@@ -28,17 +28,17 @@ import (
 // - Custom albums or categories
 
 type MediaFile struct {
-	FileName      string     `json:"fileName"`
-	MediaType     string     `json:"mediaType"`
-	FilePath      string     `json:"filePath"`
-	ThumbnailPath string     `json:"thumbnailPath"`
-	CreationDate  time.Time  `json:"creationDate"`
-	FileSize      int64      `json:"fileSize"`
-	ImageData     *ImageData `json:"imageData,omitempty"`
-	VideoData     *VideoData `json:"videoData,omitempty"`
-	Checksum      string     `json:"checksum"`
-	Tags          []string   `json:"tags"`
-	Albums        []string   `json:"albums"`
+	FileName           string     `json:"fileName"`
+	MediaType          string     `json:"mediaType"`
+	LocalFilePath      string     `json:"filePath"`
+	LocalThumbnailPath string     `json:"thumbnailPath"`
+	CreationDate       time.Time  `json:"creationDate"`
+	FileSize           int64      `json:"fileSize"`
+	ImageData          *ImageData `json:"imageData,omitempty"`
+	VideoData          *VideoData `json:"videoData,omitempty"`
+	Checksum           string     `json:"checksum"`
+	Tags               []string   `json:"tags"`
+	Albums             []string   `json:"albums"`
 }
 
 type ImageData struct {
@@ -106,18 +106,18 @@ func insertMediaToDb(mediaPath string) error {
 	}
 
 	mediaFile := MediaFile{
-		FileName:  uniqueFileName,
-		MediaType: mediaType,
-		// FilePath:      filepath.Join(filepath.Base(mediaDir), uniqueFileName),
-		FilePath:      filepath.Join(uniqueFileName),
-		ThumbnailPath: filepath.Join(filepath.Base(thumbnailDir), strings.TrimSuffix(uniqueFileName, filepath.Ext(uniqueFileName))+"_thumb.jpg"),
-		CreationDate:  creationDate,
-		FileSize:      fileSize,
-		ImageData:     nil,
-		VideoData:     nil,
-		Checksum:      checksum,
-		Tags:          []string{},
-		Albums:        []string{},
+		FileName:      uniqueFileName,
+		MediaType:     mediaType,
+		LocalFilePath: filepath.Join(filepath.Base(mediaDir), uniqueFileName),
+		// FilePath:      filepath.Join(mediaDir, uniqueFileName),
+		LocalThumbnailPath: filepath.Join(filepath.Base(thumbnailDir), strings.TrimSuffix(uniqueFileName, filepath.Ext(uniqueFileName))+"_thumb.jpg"),
+		CreationDate:       creationDate,
+		FileSize:           fileSize,
+		ImageData:          nil,
+		VideoData:          nil,
+		Checksum:           checksum,
+		Tags:               []string{},
+		Albums:             []string{},
 	}
 
 	return db.Update(func(tx *bbolt.Tx) error {
@@ -136,6 +136,60 @@ func insertMediaToDb(mediaPath string) error {
 
 }
 
+func deleteMedia(fileName []string) error {
+	return db.Update(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte("MediaFiles"))
+		if bucket == nil {
+			return nil
+		}
+		for _, name := range fileName {
+			mediaFile, err := getMediaFile(db, name)
+			if err != nil {
+				return err
+			}
+
+			err = os.Rename(filepath.Join(mediaDir, name), filepath.Join(binDir, name))
+			if err != nil {
+				return err
+			}
+			os.Remove(filepath.Join(thumbnailDir, filepath.Base(mediaFile.LocalThumbnailPath)))
+			// err = os.Rename(filepath.Join(thumbnailDir, filepath.Base(mediaFile.LocalThumbnailPath)), filepath.Join(binDir, filepath.Base(mediaFile.LocalThumbnailPath)))
+			// if err != nil {
+			// 	return err
+			// }
+			err = bucket.Delete([]byte(name))
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func printDatabaseLength() {
+	err := db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte("MediaFiles"))
+		if b == nil {
+			return nil
+		}
+		fmt.Println("Database length: ", b.Stats().KeyN)
+		return nil
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+}
+
+func clearDb() {
+	err := db.Update(func(tx *bbolt.Tx) error {
+		return tx.DeleteBucket([]byte("MediaFiles"))
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
 func calculateChecksum(filePath string) (string, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -151,44 +205,32 @@ func calculateChecksum(filePath string) (string, error) {
 	checksum := hex.EncodeToString(hash.Sum(nil))
 	return checksum, nil
 }
-func printDatabaseMediaFiles() {
-	err := db.View(func(tx *bbolt.Tx) error {
-		fmt.Println("Database Media Files:")
-		fmt.Println("---------------------")
-		return tx.ForEach(func(name []byte, b *bbolt.Bucket) error {
-			fmt.Printf("Bucket: %s\n", name)
-			fmt.Println("---------------------")
-			return b.ForEach(func(k, v []byte) error {
-				fmt.Printf("  Key: %s, Value: %s\n", k, v)
+
+func isFileallreadyExistsInDb(newFilePath string) (alreadyExists bool, existName string) {
+	newChecksum, err := calculateChecksum(newFilePath)
+	if err != nil {
+		return false, ""
+	}
+	err = db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte("MediaFiles"))
+		if bucket == nil {
+			return nil
+		}
+		return bucket.ForEach(func(k, v []byte) error {
+			var mediaFile MediaFile
+			if err := json.Unmarshal(v, &mediaFile); err != nil {
+				return err
+			}
+			if mediaFile.Checksum == newChecksum {
+				alreadyExists = true
+				existName = mediaFile.FileName
 				return nil
-			})
+			}
+			return nil
 		})
 	})
 
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func getMediaFile(db *bbolt.DB, uniqueID string) (*MediaFile, error) {
-	var mediaFile MediaFile
-	err := db.View(func(tx *bbolt.Tx) error {
-		bucket := tx.Bucket([]byte("MediaFiles"))
-		if bucket == nil {
-			return fmt.Errorf("Bucket MediaFiles not found")
-		}
-
-		data := bucket.Get([]byte(uniqueID))
-		if data == nil {
-			return fmt.Errorf("No file found with ID: %s", uniqueID)
-		}
-
-		return json.Unmarshal(data, &mediaFile)
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &mediaFile, nil
+	return alreadyExists, existName
 }
 
 func getMediaFiles(page, pageSize int, sortBy, filterBy, sortOrder string) ([]MediaFile, int, error) {
@@ -357,6 +399,46 @@ func testDuplicateInserting() {
 	}
 
 	fmt.Printf("Stored file with unique name: %s\n", uniqueFileName)
+}
+
+func printDatabaseMediaFiles() {
+	err := db.View(func(tx *bbolt.Tx) error {
+		fmt.Println("Database Media Files:")
+		fmt.Println("---------------------")
+		return tx.ForEach(func(name []byte, b *bbolt.Bucket) error {
+			fmt.Printf("Bucket: %s\n", name)
+			fmt.Println("---------------------")
+			return b.ForEach(func(k, v []byte) error {
+				fmt.Printf("  Key: %s, Value: %s\n", k, v)
+				return nil
+			})
+		})
+	})
+
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func getMediaFile(db *bbolt.DB, uniqueID string) (*MediaFile, error) {
+	var mediaFile MediaFile
+	err := db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte("MediaFiles"))
+		if bucket == nil {
+			return fmt.Errorf("Bucket MediaFiles not found")
+		}
+
+		data := bucket.Get([]byte(uniqueID))
+		if data == nil {
+			return fmt.Errorf("No file found with ID: %s", uniqueID)
+		}
+
+		return json.Unmarshal(data, &mediaFile)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &mediaFile, nil
 }
 
 // type ExifTagNames struct {

@@ -112,30 +112,27 @@
     <script>
         let startX, startY, clickX, clickY;
 
-
-        let offsetX, offsetY, naturalWidth, targetX, targetY, containerWidth,  displayWidth; // Declare offsetX and offsetY outside the function
+        let offsetX, offsetY, targetX, targetY; // Declare offsetX and offsetY outside the function
 
         function toggleFullSize(event) {
             event.stopPropagation();
             let img = document.getElementById('currentImage');
-            // img.classList.toggle('full-size');
 
             // Get the click coordinates relative to the image
-            // if (!img.classList.contains('full-size')) {
-                clickX = event.offsetX;
-                clickY = event.offsetY;
-            // }
+            clickX = event.offsetX;
+            clickY = event.offsetY;
+
             // Get the natural dimensions of the image
-            naturalWidth = img.naturalWidth;
+            let naturalWidth = img.naturalWidth;
             let naturalHeight = img.naturalHeight;
 
             // Get the container dimensions
             let container = img.parentNode;
-            containerWidth = container.offsetWidth;
+            let containerWidth = container.offsetWidth;
             let containerHeight = container.offsetHeight;
 
             // Calculate the display dimensions of the bounded image
-            let displayHeight;
+            let displayWidth, displayHeight;
             if (naturalWidth / naturalHeight > containerWidth / containerHeight) {
                 displayWidth = containerWidth;
                 displayHeight = (naturalHeight / naturalWidth) * containerWidth;
@@ -147,52 +144,18 @@
             targetX = clickX / displayWidth;
             targetY = clickY / displayHeight;
 
-            if (!img.classList.contains('full-size')) {
-                offsetX = naturalWidth * targetX - containerWidth / 2;
-                offsetY = naturalHeight * targetY - containerHeight / 2;
-            } else {
-                offsetX = naturalWidth * targetX - displayWidth / 2;
-                offsetY = naturalHeight * targetY - displayHeight / 2;
-            }
+            offsetX = naturalWidth * targetX - containerWidth / 2;
+            offsetY = naturalHeight * targetY - containerHeight / 2;
 
-            // Create a debug text element
-            let debugText = document.createElement('div');
-            debugText.style.position = 'absolute';
-            debugText.style.top = '10px';
-            debugText.style.left = '10px';
-            debugText.style.color = 'white';
-            debugText.style.background = 'rgba(0, 0, 0, 0.5)';
-            debugText.style.padding = '5px';
-            debugText.style.borderRadius = '5px';
-            debugText.style.fontSize = '12px';
-
-            // Set the debug text content
-            debugText.innerHTML = `
-                <b>Debug values:</b><br>
-                clickX: ${clickX}<br>
-                clickY: ${clickY}<br>
-                naturalWidth: ${naturalWidth}<br>
-                naturalHeight: ${naturalHeight}<br>
-                containerWidth: ${containerWidth}<br>
-                containerHeight: ${containerHeight}<br>
-                displayWidth: ${displayWidth}<br>
-                displayHeight: ${displayHeight}<br>
-                targetX: ${targetX}<br>
-                targetY: ${targetY}<br>
-                offsetX: ${offsetX}<br>
-                offsetY: ${offsetY}
-            `;
             img.classList.toggle('full-size');
             // Add the debug text element to the image
-            img.parentNode.appendChild(debugText);
+            // img.parentNode.appendChild(debugText);
 
             // Scroll the container to the calculated offset
             container.scrollLeft = offsetX;
             container.scrollTop = offsetY;
-            
+
         }
-
-
 
         function navigate(path) {
             if (path && !document.getElementById('currentImage').classList.contains('full-size')) {
@@ -215,7 +178,7 @@
             const minSwipeDistance = 50;
 
             if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > minSwipeDistance) {
-                if (deltaX > 0) {
+                if (deltaX < 0) {
                     navigate('{{ .NextPath }}');
                 } else {
                     navigate('{{ .PrevPath }}');

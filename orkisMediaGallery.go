@@ -41,6 +41,8 @@ const thumbnailDir = rootDir + "/thumbnails"
 const heicDir = rootDir + "/heic"
 const uploadDir = rootDir + "/upload"
 const mediaDir = rootDir + "/media"
+const duplicatesDir = rootDir + "/duplicated"
+const binDir = rootDir + "/bin"
 
 const certFile = "/etc/letsencrypt/live/orkiman.v6.rocks/fullchain.pem" //"cert.pem"
 const keyFile = "/etc/letsencrypt/live/orkiman.v6.rocks/privkey.pem"    //"key.pem"
@@ -70,6 +72,7 @@ func init() {
 	}
 }
 func main() {
+
 	var err error
 	globalIpv6Address, err = getDefaultIPv6Address()
 	fmt.Println(globalIpv6Address)
@@ -83,6 +86,8 @@ func main() {
 	os.MkdirAll(thumbnailDir, 0755)
 	os.MkdirAll(uploadDir, 0755)
 	os.MkdirAll(mediaDir, 0755)
+	os.MkdirAll(duplicatesDir, 0755)
+	os.MkdirAll(binDir, 0755)
 
 	db, err := openDb()
 	if err != nil {
@@ -91,18 +96,20 @@ func main() {
 	}
 	defer db.Close()
 
-	err = organizeFiles()
+	// deleteAll()
+	// fmt.Println("Files deleted successfully")
+	// return
+
+	// err = deleteMedia([]string{"20231211_120532.jpg"})
+	if err != nil {
+		fmt.Println("Error:", err)
+	}
+	err = orginizeNewFiles()
 	if err != nil {
 		fmt.Println("Error:", err)
 		return
 	}
-	// fmt.Println("Files organized successfully")
-	// err = openDb()
-	// if err != nil {
-	// 	log.Printf("Failed to open database: %v", err)
-	// 	// Handle the error appropriately
-	// 	return
-	// }
+	printDatabaseLength()
 
 	http.HandleFunc("/", basicAuth(handleRootDirectoryRequests))
 
@@ -145,6 +152,14 @@ func main() {
 	// err = http.ServeTLS(ln, nil, certFile, keyFile)
 
 }
+func deleteAll() {
+	os.RemoveAll(mediaDir)
+	os.RemoveAll(thumbnailDir)
+	os.RemoveAll(heicDir)
+	os.RemoveAll(duplicatesDir)
+	os.RemoveAll(binDir)
+	clearDb()
+}
 
 func handleRootDirectoryRequests(w http.ResponseWriter, r *http.Request) {
 	path := filepath.Join(mediaDir, r.URL.Path)
@@ -160,7 +175,7 @@ func handleRootDirectoryRequests(w http.ResponseWriter, r *http.Request) {
 	if info.IsDir() {
 		// Parse query parameters
 		page := parseQueryParam(r, "page", 1)
-		pageSize := parseQueryParam(r, "pageSize", 30)
+		pageSize := parseQueryParam(r, "pageSize", 2000)
 		sortBy := r.URL.Query().Get("sortBy")
 		if sortBy == "" {
 			sortBy = "name"
@@ -327,7 +342,7 @@ func checkAuth(username, password string) bool {
 	return username == creds.Username && password == creds.Password
 }
 
-func organizeFiles() error {
+func orginizeNewFiles() error {
 	numWorkers := 3 // runtime.NumCPU()
 	semaphore := make(chan struct{}, numWorkers)
 	var wg sync.WaitGroup
@@ -371,6 +386,15 @@ func organizeFiles() error {
 }
 
 func processFile(originalFilePath string) error {
+	fileExists, exsistingName := isFileallreadyExistsInDb(originalFilePath)
+	if fileExists {
+		err := os.Rename(originalFilePath, filepath.Join(duplicatesDir,
+			filepath.Base(originalFilePath)+"_alreadyExsistsInDataBaseWithTheName_"+exsistingName))
+		if err != nil {
+			return fmt.Errorf("error moving file: %w", err)
+		}
+		return nil
+	}
 	uniqueName, err := generateUniqueFileName(db, filepath.Base(originalFilePath))
 	if err != nil {
 		return fmt.Errorf("error generating unique file name: %w", err)
@@ -453,15 +477,42 @@ func generatePhotoThumbnail(originalImagePath string, uniqueName string, thumbna
 // New function to generate a thumbnail for a video
 func generateVideoThumbnail(videoPath string, uniqueName string, thumbnailDir string) error {
 	thumbnailPath := filepath.Join(thumbnailDir, strings.TrimSuffix(filepath.Base(uniqueName), filepath.Ext(uniqueName))+"_thumb.jpg")
+	duration, err := getVideoDuration(videoPath)
+	if err != nil {
+		fmt.Printf("Error getting video duration: %v\n", err)
+		return err
+	}
+
+	var timestamp float64
+	if duration > 4 {
+		timestamp = 2
+	} else {
+		timestamp = duration / 2
+	}
 	var stderr bytes.Buffer
-	cmd := exec.Command("ffmpeg", "-i", videoPath, "-ss", "00:00:01.000", "-vframes", "1", "-vf", "scale=200:-1", thumbnailPath)
+	cmd := exec.Command("ffmpeg", "-i", videoPath, "-ss", fmt.Sprintf("%f", timestamp), "-vframes", "1", "-vf", "scale=200:-1", thumbnailPath)
 	cmd.Stderr = &stderr // Capture standard error
-	err := cmd.Run()
+	err = cmd.Run()
 	if err != nil {
 		log.Printf("FFmpeg error: %s", stderr.String()) // Log the error message from FFmpeg
 		return err
 	}
 	return nil
+}
+func getVideoDuration(filePath string) (float64, error) {
+	cmd := exec.Command("ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", filePath)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	if err != nil {
+		return 0, err
+	}
+	durationStr := strings.TrimSpace(out.String())
+	duration, err := strconv.ParseFloat(durationStr, 64)
+	if err != nil {
+		return 0, err
+	}
+	return duration, nil
 }
 
 func adjustOrientation(img image.Image, orientation int) image.Image {

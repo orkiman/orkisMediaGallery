@@ -70,6 +70,20 @@
 </head>
 <body>
     <h1>orkis media galley</h1> 
+    
+    <div class="grid">
+        {{range .Files}}
+            <div class="grid-item">
+                <a href="{{.FileName}}">
+                    <div class="thumbnail-container">
+                        <img class="thumbnail {{if eq .MediaType "video"}}video-frame{{else if eq .MediaType "image"}}image-frame{{end}}" src="{{.LocalThumbnailPath}}" alt="{{.FileName}}">
+                    </div>
+                    <p class="file-name">{{.FileName}}</p>
+                </a>
+            </div>
+        {{end}}
+    </div>
+    
     <div class="controls">
         <form action="" method="get">
             <label for="sortBy">Sort by:</label>
@@ -92,19 +106,6 @@
         </form>
     </div>
 
-    <div class="grid">
-        {{range .Files}}
-            <div class="grid-item">
-                <a href="{{.FilePath}}">
-                    <div class="thumbnail-container">
-                        <img class="thumbnail {{if eq .MediaType "video"}}video-frame{{else if eq .MediaType "image"}}image-frame{{end}}" src="{{.ThumbnailPath}}" alt="{{.FileName}}">
-                    </div>
-                    <p class="file-name">{{.FileName}}</p>
-                </a>
-            </div>
-        {{end}}
-    </div>
-
     <div class="pagination">
         {{if gt .CurrentPage 1}}
             <a href="?page={{.PrevPage}}&sortBy={{.SortBy}}&sortOrder={{.SortOrder}}&filterBy={{.FilterBy}}">&laquo; Previous</a>
@@ -122,6 +123,6 @@
             <a href="?page={{.NextPage}}&sortBy={{.SortBy}}&sortOrder={{.SortOrder}}&filterBy={{.FilterBy}}">Next &raquo;</a>
         {{end}}
     </div>
-    <p>PC IPv6 Address: {{.Ipv6Address}}</p>
+    <!-- <p>PC IPv6 Address: {{.Ipv6Address}}</p> -->
 </body>
 </html>
