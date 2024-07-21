@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,33 +11,40 @@
             margin: 0;
             padding: 20px;
         }
+
         .grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
             gap: 10px;
         }
+
         .grid-item {
             text-align: center;
         }
+
         .thumbnail-container {
             position: relative;
             width: 160px;
             height: 160px;
             margin: 0 auto;
         }
+
         .thumbnail {
             width: 100%;
             height: 100%;
             object-fit: cover;
             border-radius: 5px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
         }
+
         .video-frame {
             border: 3px solid #4CAF50;
         }
+
         .image-frame {
             border: 3px solid #3498db;
         }
+
         .file-name {
             margin-top: 5px;
             font-size: 0.9em;
@@ -45,10 +53,12 @@
             white-space: nowrap;
             max-width: 160px;
         }
+
         .pagination {
             margin-top: 20px;
             text-align: center;
         }
+
         .pagination a {
             color: black;
             padding: 8px 16px;
@@ -57,72 +67,292 @@
             border: 1px solid #ddd;
             margin: 0 4px;
         }
+
         .pagination a.active {
             background-color: #4CAF50;
             color: white;
             border: 1px solid #4CAF50;
         }
-        .pagination a:hover:not(.active) {background-color: #ddd;}
+
+        .pagination a:hover:not(.active) {
+            background-color: #ddd;
+        }
+
         .controls {
             margin-bottom: 20px;
         }
+
+        /* Checkbox styles */
+        .checkbox-wrapper {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            width: 20px;
+            height: 20px;
+        }
+
+        .checkbox-wrapper input[type="checkbox"] {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .checkmark {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 20px;
+            width: 20px;
+            background-color: #eee;
+            border-radius: 3px;
+            opacity: 0.3;
+            transition: opacity 0.3s ease;
+        }
+
+        .thumbnail-container:hover .checkmark,
+        .checkbox-wrapper input:checked~.checkmark {
+            opacity: 1;
+        }
+
+        .checkbox-wrapper input:checked~.checkmark {
+            background-color: #2196F3;
+        }
+
+        .checkmark:after {
+            content: "";
+            position: absolute;
+            display: none;
+        }
+
+        .checkbox-wrapper input:checked~.checkmark:after {
+            display: block;
+        }
+
+        .checkbox-wrapper .checkmark:after {
+            left: 7px;
+            top: 3px;
+            width: 5px;
+            height: 10px;
+            border: solid white;
+            border-width: 0 3px 3px 0;
+            transform: rotate(45deg);
+        }
+
+        .submit-selected {
+            margin-top: 20px;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        .submit-selected:hover {
+            background-color: #45a049;
+        }
+
+        .submit-selected:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+
+        .process-selected-button-container {
+            position: fixed;
+            bottom: 0;
+            width: 100%;
+            text-align: center;
+            padding: 10px;
+            background-color: #f8f9fa;
+            /* Optional: adds a background color */
+            box-shadow: 0 -2px 4px rgba(0, 0, 0, 0.1);
+            /* Optional: adds a slight shadow for depth */
+        }
+
+        .action-select {
+            margin-right: 10px;
+            /* Adds some space between the dropdown and the submit button */
+            padding: 10px 20px;
+            background-color: white;
+            color: #4CAF50;
+            border: 2px solid #4CAF50;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        .action-select:hover {
+            background-color: #f0f0f0;
+        }
+
     </style>
 </head>
+
 <body>
-    <h1>orkis media galley</h1> 
-    
-    <div class="grid">
-        {{range .Files}}
-            <div class="grid-item">
-                <a href="{{.FileName}}">
-                    <div class="thumbnail-container">
-                        <img class="thumbnail {{if eq .MediaType "video"}}video-frame{{else if eq .MediaType "image"}}image-frame{{end}}" src="{{.LocalThumbnailPath}}" alt="{{.FileName}}">
-                    </div>
-                    <p class="file-name">{{.FileName}}</p>
-                </a>
-            </div>
-        {{end}}
-    </div>
-    
+    <h1>orkis media gallery</h1>
+
     <div class="controls">
         <form action="" method="get">
             <label for="sortBy">Sort by:</label>
             <select name="sortBy" id="sortBy">
-                <option value="name" {{if eq .SortBy "name"}}selected{{end}}>Name</option>
-                <option value="date" {{if eq .SortBy "date"}}selected{{end}}>Date</option>
-                <option value="size" {{if eq .SortBy "size"}}selected{{end}}>Size</option>
+                <option value="name" {{if eq .SortBy "name" }}selected{{end}}>Name</option>
+                <option value="date" {{if eq .SortBy "date" }}selected{{end}}>Date</option>
+                <option value="size" {{if eq .SortBy "size" }}selected{{end}}>Size</option>
             </select>
-            
+
             <label for="sortOrder">Order:</label>
             <select name="sortOrder" id="sortOrder">
-                <option value="asc" {{if eq .SortOrder "asc"}}selected{{end}}>Ascending</option>
-                <option value="desc" {{if eq .SortOrder "desc"}}selected{{end}}>Descending</option>
+                <option value="asc" {{if eq .SortOrder "asc" }}selected{{end}}>Ascending</option>
+                <option value="desc" {{if eq .SortOrder "desc" }}selected{{end}}>Descending</option>
             </select>
-            
+
             <label for="filterBy">Filter:</label>
             <input type="text" name="filterBy" id="filterBy" value="{{.FilterBy}}">
-            
-            <button type="submit">Apply</button>
+
+            <button type="submit">Apply sorting / filtering</button>
         </form>
     </div>
 
+    <form id="selected-form" action="/process-selected" method="POST">
+        <div class="grid">
+            {{range .Files}}
+            <div class="grid-item">
+                <div class="thumbnail-container">
+                    <a href="{{.FileName}}">
+                        <img class="thumbnail {{if eq .MediaType "video"}}video-frame{{else if eq .MediaType "image"}}image-frame{{end}}" src="{{.LocalThumbnailPath}}" alt="{{.FileName}}">
+                    </a>
+                    <label class="checkbox-wrapper">
+                        <input type="checkbox" name="selected_files" value="{{.FileName}}">
+                        <span class="checkmark"></span> 
+                        <!-- <p class="file-name">{{.FileName}}</p> -->
+                    </label>
+                </div>
+                    
+                
+            </div>
+            {{end}}
+        </div>
+        
+        <!-- add littls space from the bottom -->
+        <div style="height: 50px;"></div>
+
+        <div class=process-selected-button-container>
+            <select class="action-select">
+                <option value="selectAction">select action</option>
+                <option value="delete">Delete</option>
+                <option value="share">Share</option>
+                <option value="addToAlbum">Add to Album</option>
+                <option value="addTags">Add Tags</option>
+            </select>
+            <button type="submit" class="submit-selected" id="process-seleced-button" disabled>Process Selected
+                Files</button>
+        </div>
+    </form>
+
     <div class="pagination">
         {{if gt .CurrentPage 1}}
-            <a href="?page={{.PrevPage}}&sortBy={{.SortBy}}&sortOrder={{.SortOrder}}&filterBy={{.FilterBy}}">&laquo; Previous</a>
+        <a href="?page={{.PrevPage}}&sortBy={{.SortBy}}&sortOrder={{.SortOrder}}&filterBy={{.FilterBy}}">&laquo;
+            Previous</a>
         {{end}}
-        
+
         {{range .Pages}}
-            {{if eq . $.CurrentPage}}
-                <a href="#" class="active">{{.}}</a>
-            {{else}}
-                <a href="?page={{.}}&sortBy={{$.SortBy}}&sortOrder={{$.SortOrder}}&filterBy={{$.FilterBy}}">{{.}}</a>
-            {{end}}
+        {{if eq . $.CurrentPage}}
+        <a href="#" class="active">{{.}}</a>
+        {{else}}
+        <a href="?page={{.}}&sortBy={{$.SortBy}}&sortOrder={{$.SortOrder}}&filterBy={{$.FilterBy}}">{{.}}</a>
         {{end}}
-        
+        {{end}}
+
         {{if lt .CurrentPage .TotalPages}}
-            <a href="?page={{.NextPage}}&sortBy={{.SortBy}}&sortOrder={{.SortOrder}}&filterBy={{.FilterBy}}">Next &raquo;</a>
+        <a href="?page={{.NextPage}}&sortBy={{.SortBy}}&sortOrder={{.SortOrder}}&filterBy={{.FilterBy}}">Next
+            &raquo;</a>
         {{end}}
     </div>
-    <!-- <p>PC IPv6 Address: {{.Ipv6Address}}</p> -->
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const selectedForm = document.getElementById('selected-form');
+            const processSelectedButton = document.getElementById('process-seleced-button');
+            const checkboxes = selectedForm.querySelectorAll('input[type="checkbox"]');
+
+            function updateProcessSelectedButton() {
+                const checkedBoxes = selectedForm.querySelectorAll('input[type="checkbox"]:checked');
+                processSelectedButton.disabled = checkedBoxes.length === 0;
+            }
+
+            checkboxes.forEach(function (checkbox) {
+                checkbox.addEventListener('change', updateProcessSelectedButton);
+            });
+
+            selectedForm.addEventListener('submit', function (event) {
+                event.preventDefault();
+                const selectedFiles = Array.from(selectedForm.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
+                const selectedAction = selectedForm.querySelector('.action-select').value;
+                console.log('Selected files:', selectedFiles);
+                console.log('Selected action:', selectedAction);
+                if (selectedAction === 'selectAction') {
+                    alert('Please select an action');
+                    return;
+                }
+                if (selectedAction === 'delete' && !confirm('Are you sure you want to delete the selected files?')) {
+                    return;
+                }
+
+                fetch('/processSelected', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        selectedFiles,
+                        selectedAction
+                    })
+                }).then(function (response) {
+                    if (response.ok) {
+                        // Set a flag in session storage to show a success message                       
+                        message = selectedFiles.length + " files successfully " + 
+                            (selectedAction === 'delete' ? 'moved to bin folder for some time before deleted permanenly' : 'processed');
+                        sessionStorage.setItem('showSuccessMessage', 'true');
+                        sessionStorage.setItem('successMessage', message);
+                        // Reload the page
+                        window.location.reload();
+                    } else {
+                        response.text().then(function (text) {
+                            alert('An error occurred while processing the files: \n' + text);
+                        });
+                    }
+                });
+
+            });
+        });
+        document.addEventListener('DOMContentLoaded', (event) => {
+            if (sessionStorage.getItem('showSuccessMessage') === 'true') {
+                // Clear the flag
+                sessionStorage.removeItem('showSuccessMessage');
+
+                // Create and display the message div
+                const messageDiv = document.createElement('div');
+                messageDiv.textContent = sessionStorage.getItem('successMessage');
+                // messageDiv.textContent = 'Files processed successfully';
+                messageDiv.style.position = 'fixed';
+                messageDiv.style.left = '50%';
+                messageDiv.style.top = '20%';
+                messageDiv.style.transform = 'translate(-50%, -50%)';
+                messageDiv.style.backgroundColor = 'lightgreen';
+                messageDiv.style.padding = '20px';
+                messageDiv.style.zIndex = '1000';
+                messageDiv.style.borderRadius = '5px';
+                messageDiv.style.boxShadow = '0 4px 6px rgba(0,0,0,0.1)';
+                document.body.appendChild(messageDiv);
+
+                // Remove the message div after 10 seconds
+                setTimeout(() => {
+                    document.body.removeChild(messageDiv);
+                }, 4000);
+            }
+        });
+    </script>
 </body>
+
 </html>

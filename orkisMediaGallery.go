@@ -36,6 +36,11 @@ type PageData struct {
 	FilterBy    string
 }
 
+type processSelectedRequest struct {
+	SelectedFiles  []string `json:"selectedFiles"`
+	SelectedAction string   `json:"selectedAction"`
+}
+
 const rootDir = "/home/spot/spot-or/myPhotosTest"
 const thumbnailDir = rootDir + "/thumbnails"
 const heicDir = rootDir + "/heic"
@@ -101,9 +106,10 @@ func main() {
 	// return
 
 	// err = deleteMedia([]string{"20231211_120532.jpg"})
-	if err != nil {
-		fmt.Println("Error:", err)
-	}
+	// if err != nil {
+	// 	fmt.Println("Error:", err)
+	// }
+
 	err = orginizeNewFiles()
 	if err != nil {
 		fmt.Println("Error:", err)
@@ -119,6 +125,7 @@ func main() {
 
 	http.HandleFunc("/thumbnails/", basicAuth(handleThumbnails))
 
+	http.HandleFunc("/processSelected", basicAuth(handleProcessSelected))
 	fmt.Println("Server starting on port 8443...")
 	err = http.ListenAndServeTLS(":8443", certFile, keyFile, nil)
 	if err != nil {
@@ -288,6 +295,32 @@ func handleRootDirectoryRequests(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+func handleProcessSelected(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req processSelectedRequest
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.SelectedAction == "delete" {
+		err = deleteMedia(req.SelectedFiles)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		http.Error(w, "action not yet implemented", http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 func parseQueryParam(r *http.Request, name string, defaultValue int) int {
