@@ -78,6 +78,9 @@ func init() {
 }
 func main() {
 
+	// facesMain()
+	// return
+
 	var err error
 	globalIpv6Address, err = getDefaultIPv6Address()
 	fmt.Println(globalIpv6Address)
