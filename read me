@@ -22,3 +22,9 @@ server start: all photos directory will be scanned:
 albums:
 each photo can be added to multiple albums
 the information about the album will be stored in a data file (choose format)
+
+dependecies list:
+go ;)
+imagemagick
+libheif-dev
+ffmpeg

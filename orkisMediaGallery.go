@@ -41,7 +41,7 @@ type processSelectedRequest struct {
 	SelectedAction string   `json:"selectedAction"`
 }
 
-const rootDir = "/home/spot/spot-or/myPhotosTest"
+const rootDir = "/home/orkiman/Pictures/myPhotosTest"
 const thumbnailDir = rootDir + "/thumbnails"
 const heicDir = rootDir + "/heic"
 const uploadDir = rootDir + "/upload"
@@ -49,8 +49,8 @@ const mediaDir = rootDir + "/media"
 const duplicatesDir = rootDir + "/duplicated"
 const binDir = rootDir + "/bin"
 
-const certFile = "/etc/letsencrypt/live/orkiman.v6.rocks/fullchain.pem" //"cert.pem"
-const keyFile = "/etc/letsencrypt/live/orkiman.v6.rocks/privkey.pem"    //"key.pem"
+const certFile = "/etc/mygoapp/certs/fullchain.pem" //"cert.pem"
+const keyFile = "/etc/mygoapp/certs/privkey.pem"    //"key.pem"
 // const certFile = "/home/spot/ssl_certs/fullchain.pem" //"cert.pem"
 // const keyFile = "/home/spot/ssl_certs/privkey.pem"    //"key.pem"
 
@@ -129,37 +129,24 @@ func main() {
 	http.HandleFunc("/thumbnails/", basicAuth(handleThumbnails))
 
 	http.HandleFunc("/processSelected", basicAuth(handleProcessSelected))
-	fmt.Println("Server starting on port 8443...")
-	err = http.ListenAndServeTLS(":8443", certFile, keyFile, nil)
-	if err != nil {
-		fmt.Println("Failed to start server:", err)
+	encripted := true
+	if encripted {
+		// for production:
+		fmt.Println("Server starting on port 8443...")
+		err = http.ListenAndServeTLS(":8443", certFile, keyFile, nil)
+		if err != nil {
+			fmt.Println("Failed to start server:", err)
+		}
+	} else {
+		// for localhost testing - no ssl (port 8080):
+		port := "80"
+		fmt.Printf("Server starting on port %s...\n", port)
+		// err = http.ListenAndServe("localhost:8080", nil) // for development access only from localhost
+		err = http.ListenAndServe(":"+port, nil) // for development access allow from anywhere
+		if err != nil {
+			fmt.Println("Failed to start server:", err)
+		}
 	}
-
-	// for localhost testing - no ssl (port 8080):
-
-	// fmt.Println("Server starting on port 8080...")
-	// // err = http.ListenAndServe("localhost:8080", nil) // for development access only from localhost
-	// err = http.ListenAndServe(":8080", nil) // for development access only from localhost
-	// if err != nil {
-	// 	fmt.Println("Failed to start server:", err)
-	// }
-
-	// no need to use below... delete it
-
-	// fmt.Println("Server starting on port 8443...")
-	// err = http.ListenAndServeTLS(":8443", "path/to/certFile", "path/to/keyFile", nil)
-	// if err != nil {
-	// 	fmt.Println("Failed to start server:", err)
-	// }
-
-	// ln, err := net.Listen("tcp6", "["+globalIpv6Address+"]:8443")
-	// if err != nil {
-	// 	fmt.Println("Error:", err)
-	// 	return
-	// }
-
-	// fmt.Println("Server starting on port 8443...")
-	// err = http.ServeTLS(ln, nil, certFile, keyFile)
 
 }
 func deleteAll() {
@@ -474,7 +461,8 @@ func convertHeicToJpegAndGenerateThumbnail(originalHeicPath string, uniqueName s
 	// dest := strings.TrimSuffix(heicSrcPath, filepath.Ext(heicSrcPath)) + ".jpg"
 	newJpgPath := filepath.Join(mediaDir, uniqueName) //strings.TrimSuffix(filepath.Base(originalHeicPath), filepath.Ext(originalHeicPath))+".jpg")
 	newHeicPath := filepath.Join(heicDir, filepath.Base(originalHeicPath))
-	cmd := exec.Command("magick", "convert", originalHeicPath, newJpgPath)
+	// cmd := exec.Command("magick", "convert", originalHeicPath, newJpgPath)
+	cmd := exec.Command("convert", originalHeicPath, newJpgPath)
 	err := cmd.Run()
 	if err != nil {
 		return err
