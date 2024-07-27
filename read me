@@ -28,3 +28,45 @@ go ;)
 imagemagick
 libheif-dev
 ffmpeg
+------------------
+opencv: (on debian)
+
+sudo apt update
+sudo apt install -y build-essential cmake pkg-config libjpeg-dev libpng-dev libtiff-dev libavcodec-dev libavformat-dev libswscale-dev libv4l-dev libxvidcore-dev libx264-dev libgtk-3-dev libatlas-base-dev gfortran python3-dev
+
+cd ~
+wget -O opencv.zip https://github.com/opencv/opencv/archive/4.x.zip
+unzip opencv.zip
+cd opencv-4.x
+mkdir build && cd build
+cmake -D CMAKE_BUILD_TYPE=RELEASE -D CMAKE_INSTALL_PREFIX=/usr/local ..
+make -j$(nproc)
+sudo make install
+ i had to :
+ echo 'export PKG_CONFIG_PATH=$PKG_CONFIG_PATH:/usr/local/lib/pkgconfig' >> ~/.bashrc
+echo 'export CGO_CPPFLAGS="-I/usr/local/include/opencv4"' >> ~/.bashrc
+echo 'export CGO_LDFLAGS="-L/usr/local/lib -lopencv_core -lopencv_dnn -lopencv_imgproc"' >> ~/.bashrc
+
+and edit launch.json to debug:
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch Package",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${fileDirname}",
+            "buildFlags": ["-buildvcs=false"],
+            "env": {
+                "PKG_CONFIG_PATH": "${env:PKG_CONFIG_PATH}:/usr/local/lib/pkgconfig",
+                "CGO_CPPFLAGS": "-I/usr/local/include/opencv4",
+                "CGO_LDFLAGS": "-L/usr/local/lib -lopencv_core -lopencv_dnn -lopencv_imgproc"
+            }
+        }
+    ]
+}
+
+-------------------
+face detection resources i used : https://gocv.io/writing-code/more-examples/ -> DNN Detection
+

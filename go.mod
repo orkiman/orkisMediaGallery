@@ -1,4 +1,4 @@
-module filesserver
+module orkisMediaGallery
 
 go 1.22.4
 
@@ -15,6 +15,7 @@ require (
 	github.com/go-errors/errors v1.4.2 // indirect
 	github.com/golang/geo v0.0.0-20210211234256-740aa86cb551 // indirect
 	go.etcd.io/bbolt v1.3.10
+	gocv.io/x/gocv v0.37.0
 	golang.org/x/image v0.0.0-20191009234506-e7c1f5e7dbb8 // indirect
 	golang.org/x/net v0.0.0-20221002022538-bcab6841153b // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect

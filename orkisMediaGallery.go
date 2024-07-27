@@ -24,7 +24,7 @@ import (
 )
 
 type PageData struct {
-	Files       []MediaFile
+	Files       []MediaItem
 	Ipv6Address string
 	CurrentPage int
 	TotalPages  int
@@ -119,7 +119,7 @@ func main() {
 		return
 	}
 	printDatabaseLength()
-
+	testCv()
 	http.HandleFunc("/", basicAuth(handleRootDirectoryRequests))
 
 	http.Handle("/media/", basicAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -184,7 +184,7 @@ func handleRootDirectoryRequests(w http.ResponseWriter, r *http.Request) {
 		filterBy := r.URL.Query().Get("filterBy")
 
 		// Query the database for files
-		mediaFiles, totalFiles, err := getMediaFiles(page, pageSize, sortBy, filterBy, sortOrder)
+		mediaItems, totalFiles, err := getMediaItems(page, pageSize, sortBy, filterBy, sortOrder)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -206,7 +206,7 @@ func handleRootDirectoryRequests(w http.ResponseWriter, r *http.Request) {
 
 		// Prepare data for template
 		data := PageData{
-			Files:       mediaFiles,
+			Files:       mediaItems,
 			Ipv6Address: globalIpv6Address,
 			CurrentPage: page,
 			TotalPages:  totalPages,
@@ -404,7 +404,7 @@ func orginizeNewFiles() error {
 	for err := range errChan {
 		return err
 	}
-	// printDatabaseMediaFiles()
+	// printDatabaseMediaItems()
 	return nil
 }
 

@@ -32,21 +32,48 @@ This face recognition system will process images and videos, detect faces, gener
 
 #### Media Item (BoltDB)
 ```go
+// type MediaItem struct {
+//     ID       string
+//     Filename string
+//     Path     string
+//     Type     string // "image" or "video"
+//     FaceIDs  []string
+// }
+
 type MediaItem struct {
-    ID       string
-    Filename string
-    Path     string
-    Type     string // "image" or "video"
-    FaceIDs  []string
+	FileName           string     `json:"fileName"` // unique
+	MediaType          string     `json:"mediaType"`
+	LocalFilePath      string     `json:"filePath"`
+	LocalThumbnailPath string     `json:"thumbnailPath"`
+	CreationDate       time.Time  `json:"creationDate"`
+	FileSize           int64      `json:"fileSize"`
+	ImageData          *ImageData `json:"imageData,omitempty"`
+	VideoData          *VideoData `json:"videoData,omitempty"`
+	Checksum           string     `json:"checksum"`
+	Tags               []string   `json:"tags"`
+	Albums             []string   `json:"albums"`
+    FaceIDs            []string   `json:"faceIds"`
 }
+
+
 ```
+
+
+
+
+
+
+
+
+
+
 
 #### Face Embedding (Milvus)
 ```go
 type FaceEmbedding struct {
     ID        string
     Embedding []float32
-    MediaID   string
+    MediaFileName  string
 }
 ```
 
