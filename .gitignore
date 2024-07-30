@@ -1,2 +1,3 @@
-# Ignore credentials file
-.myapp_credentials.json
+# Ignore static files (some of them are too big and some confidentials ;)
+/staticFiles/**
+staticFiles/

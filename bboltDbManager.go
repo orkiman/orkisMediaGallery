@@ -64,6 +64,7 @@ type VideoData struct {
 }
 
 type MediaItem struct {
+	ID                 int64      `json:"mediaId"`  //unique
 	FileName           string     `json:"fileName"` // unique
 	MediaType          string     `json:"mediaType"`
 	LocalFilePath      string     `json:"filePath"`
@@ -80,7 +81,7 @@ type MediaItem struct {
 
 var db *bbolt.DB
 
-func openDb() (*bbolt.DB, error) {
+func openBboltDb() (*bbolt.DB, error) {
 	var err error
 	db, err = bbolt.Open("media.db", 0600, nil)
 	if err != nil {
@@ -146,6 +147,7 @@ func insertMediaToDb(mediaPath string) error {
 		Tags:               []string{},
 		Albums:             []string{},
 	}
+	handleMediaItem(mediaItem)
 
 	return db.Update(func(tx *bbolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists([]byte("MediaItems"))

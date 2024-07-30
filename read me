@@ -70,3 +70,15 @@ and edit launch.json to debug:
 -------------------
 face detection resources i used : https://gocv.io/writing-code/more-examples/ -> DNN Detection
 
+face recognition( create embeddings):
+i used github.com/yalue/onnxruntime_go with arcfaceresnet100-8.onnx model which is a model trained for face recognition. 
+as far as i remember i dowloaded it from here
+https://github.com/onnx/models/tree/main/validated/vision/body_analysis/arcface
+i checked the model charicteristics using netron which you first start from the terminal like this : netron-env/bin/netron,
+     then browse to 127.0.0.1:8080 and load the model you want to check
+i also installed onnxruntime some how (downloaded tar and extract it and copy it to some places)
+
+milvus (clustering)
+i installed docker
+then installed milvus like this : https://milvus.io/docs/install_standalone-docker.md
+

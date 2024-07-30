@@ -208,3 +208,29 @@ func ClusterFaces() error {
 3. Develop a web interface for easier interaction with the system
 4. Implement incremental learning to improve face recognition accuracy over time
 
+
+
+
+
+-----------------------------
+## Embeddings Database Structure
+Embeddings Table:
+faceEmbedding: The float32 vector representing the face.
+mediaID: The identifier for the media (image or video) the face was extracted from.
+Clustering Output Structure
+Clustering Table:
+clusterID: A unique identifier for each cluster (group of similar faces, ideally the same person).
+mediaIDs: A list of mediaIDs where the faces in this cluster appear.
+embeddingCount: The number of embeddings in this cluster, which can be used to sort clusters by size.
+Detailed Steps
+Store Embeddings:
+
+Save the face embeddings along with their corresponding mediaIDs in BoltDB.
+Fetch and Cluster Embeddings:
+
+Retrieve all embeddings from BoltDB.
+Perform clustering using a suitable algorithm (e.g., HDBSCAN).
+Assign a clusterID to each embedding based on the clustering results.
+Store Clustering Results:
+
+For each clusterID, maintain a list of mediaIDs and the count of embeddings in that cluster.

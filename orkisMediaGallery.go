@@ -63,7 +63,7 @@ var globalIpv6Address string
 var creds Credentials
 
 func init() {
-	credFile := filepath.Join(".", ".myapp_credentials.json")
+	credFile := filepath.Join(".", "staticFiles/.login_credentials.json")
 	file, err := os.Open(credFile)
 	if err != nil {
 		panic("Could not open credentials file")
@@ -97,7 +97,7 @@ func main() {
 	os.MkdirAll(duplicatesDir, 0755)
 	os.MkdirAll(binDir, 0755)
 
-	db, err := openDb()
+	db, err := openBboltDb()
 	if err != nil {
 		fmt.Println("Error:", err)
 		return
@@ -119,7 +119,7 @@ func main() {
 		return
 	}
 	printDatabaseLength()
-	testCv()
+	// testCv()
 	http.HandleFunc("/", basicAuth(handleRootDirectoryRequests))
 
 	http.Handle("/media/", basicAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
