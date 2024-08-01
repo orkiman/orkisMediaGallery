@@ -35,6 +35,7 @@ require (
 	github.com/dsoprea/go-utility/v2 v2.0.0-20221003172846-a3e1774ef349 // indirect
 	github.com/go-errors/errors v1.4.2 // indirect
 	github.com/golang/geo v0.0.0-20210211234256-740aa86cb551 // indirect
+	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/milvus-io/milvus-sdk-go/v2 v2.4.1
 	github.com/yalue/onnxruntime_go v1.11.0
 	go.etcd.io/bbolt v1.3.10

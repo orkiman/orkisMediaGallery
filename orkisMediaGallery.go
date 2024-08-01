@@ -77,6 +77,8 @@ func init() {
 	}
 }
 func main() {
+	deleteAll()
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	// facesMain()
 	// return
@@ -97,14 +99,13 @@ func main() {
 	os.MkdirAll(duplicatesDir, 0755)
 	os.MkdirAll(binDir, 0755)
 
-	db, err := openBboltDb()
+	mediaDb, err := openBboltDb()
 	if err != nil {
 		fmt.Println("Error:", err)
 		return
 	}
-	defer db.Close()
+	defer mediaDb.Close()
 
-	// deleteAll()
 	// fmt.Println("Files deleted successfully")
 	// return
 
@@ -113,11 +114,25 @@ func main() {
 	// 	fmt.Println("Error:", err)
 	// }
 
-	err = orginizeNewFiles()
+	var processedFilesCounter int
+	processedFilesCounter, err = orginizeNewFiles()
 	if err != nil {
 		fmt.Println("Error:", err)
 		return
 	}
+
+	if processedFilesCounter > 0 && false {
+		// run clustering
+		cmd := exec.Command("python3", "clusterEmbeddings.py")
+		err := cmd.Run()
+		if err != nil {
+			log.Println("Failed to run clusterEmbeddings.py:", err)
+			return
+		}
+		// update media db with clustering results
+		// getClustersAndUpdatefacesDataInMediaDb()
+	}
+
 	printDatabaseLength()
 	// testCv()
 	http.HandleFunc("/", basicAuth(handleRootDirectoryRequests))
@@ -149,13 +164,15 @@ func main() {
 	}
 
 }
+
 func deleteAll() {
 	os.RemoveAll(mediaDir)
 	os.RemoveAll(thumbnailDir)
 	os.RemoveAll(heicDir)
 	os.RemoveAll(duplicatesDir)
 	os.RemoveAll(binDir)
-	clearDb()
+	os.RemoveAll("media.db")
+	// clearDb()
 }
 
 func handleRootDirectoryRequests(w http.ResponseWriter, r *http.Request) {
@@ -189,6 +206,10 @@ func handleRootDirectoryRequests(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
+		// // testing clustering:
+		// mediaItems = getbiggestClusterGroup()
+		// totalFiles = len(mediaItems)
 
 		// Calculate pagination details
 		totalPages := (totalFiles + pageSize - 1) / pageSize
@@ -365,7 +386,9 @@ func checkAuth(username, password string) bool {
 	return username == creds.Username && password == creds.Password
 }
 
-func orginizeNewFiles() error {
+func orginizeNewFiles() (processedFilesCounter int, err error) {
+	embeddingsDb := openEmbeddingsDb()
+	defer embeddingsDb.Close()
 	numWorkers := 3 // runtime.NumCPU()
 	semaphore := make(chan struct{}, numWorkers)
 	var wg sync.WaitGroup
@@ -387,6 +410,7 @@ func orginizeNewFiles() error {
 					if err := processFile(path); err != nil {
 						errChan <- err
 					}
+					processedFilesCounter++
 				}(path)
 			}
 
@@ -402,10 +426,11 @@ func orginizeNewFiles() error {
 
 	// Collect and return the first error, if any
 	for err := range errChan {
-		return err
+		return processedFilesCounter, err
 	}
+
 	// printDatabaseMediaItems()
-	return nil
+	return processedFilesCounter, nil
 }
 
 func processFile(originalFilePath string) error {
@@ -418,7 +443,7 @@ func processFile(originalFilePath string) error {
 		}
 		return nil
 	}
-	uniqueName, err := generateUniqueFileName(db, filepath.Base(originalFilePath))
+	uniqueName, err := generateUniqueFileName(mediaDB, filepath.Base(originalFilePath))
 	if err != nil {
 		return fmt.Errorf("error generating unique file name: %w", err)
 	}
@@ -444,6 +469,7 @@ func processFile(originalFilePath string) error {
 			}
 		} else {
 			if err := generatePhotoThumbnail(originalFilePath, uniqueName, thumbnailDir); err != nil {
+				log.Println(err)
 				return fmt.Errorf("error generating thumbnail for image: %w", err)
 			}
 			if err := os.Rename(originalFilePath, filepath.Join(mediaDir, uniqueName)); err != nil {
@@ -454,7 +480,11 @@ func processFile(originalFilePath string) error {
 		return fmt.Errorf("unsupported file type: %s", originalFilePath)
 	}
 
-	return insertMediaToDb(filepath.Join(mediaDir, uniqueName))
+	mediaItem, err := insertMediaToDb(filepath.Join(mediaDir, uniqueName))
+	// _, err = insertMediaToDb(filepath.Join(mediaDir, uniqueName))
+	ProcessMediaItemFaces(&mediaItem)
+
+	return err
 }
 
 func convertHeicToJpegAndGenerateThumbnail(originalHeicPath string, uniqueName string, mediaDir string, heicDir string, thumbnailDir string) error {

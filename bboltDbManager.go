@@ -64,8 +64,7 @@ type VideoData struct {
 }
 
 type MediaItem struct {
-	ID                 int64      `json:"mediaId"`  //unique
-	FileName           string     `json:"fileName"` // unique
+	FileName           string     `json:"fileName"` // unique mediaID
 	MediaType          string     `json:"mediaType"`
 	LocalFilePath      string     `json:"filePath"`
 	LocalThumbnailPath string     `json:"thumbnailPath"`
@@ -79,23 +78,24 @@ type MediaItem struct {
 	FaceIDs            []string   `json:"faceIds"`
 }
 
-var db *bbolt.DB
+var mediaDB *bbolt.DB
 
 func openBboltDb() (*bbolt.DB, error) {
 	var err error
-	db, err = bbolt.Open("media.db", 0600, nil)
+	mediaDB, err = bbolt.Open("media.db", 0600, nil)
 	if err != nil {
 		log.Fatal(err)
 		return nil, err
 	}
 
-	return db, nil
+	return mediaDB, nil
 }
 
-func insertMediaToDb(mediaPath string) error {
-	uniqueFileName, err := generateUniqueFileName(db, filepath.Base(mediaPath))
+func insertMediaToDb(mediaPath string) (MediaItem, error) {
+	// todo : generate unique mediaID
+	uniqueFileName, err := generateUniqueFileName(mediaDB, filepath.Base(mediaPath))
 	if err != nil {
-		return err
+		return MediaItem{}, err
 	}
 	var mediaType string
 	if isImage(mediaPath) {
@@ -106,7 +106,7 @@ func insertMediaToDb(mediaPath string) error {
 		mediaType = "unknown"
 	}
 	if mediaType == "unknown" {
-		return errors.New("unknown file type")
+		return MediaItem{}, errors.New("unknown file type")
 	}
 	var creationDate time.Time
 	if mediaType == "video" {
@@ -124,13 +124,13 @@ func insertMediaToDb(mediaPath string) error {
 
 	fileInfo, err := os.Stat(mediaPath)
 	if err != nil {
-		return err
+		return MediaItem{}, err
 	}
 	fileSize := fileInfo.Size()
 
 	checksum, err := calculateChecksum(mediaPath)
 	if err != nil {
-		return err
+		return MediaItem{}, err
 	}
 
 	mediaItem := MediaItem{
@@ -146,10 +146,11 @@ func insertMediaToDb(mediaPath string) error {
 		Checksum:           checksum,
 		Tags:               []string{},
 		Albums:             []string{},
+		FaceIDs:            []string{},
 	}
-	handleMediaItem(mediaItem)
+	// handleMediaItem(mediaItem)
 
-	return db.Update(func(tx *bbolt.Tx) error {
+	err = mediaDB.Update(func(tx *bbolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists([]byte("MediaItems"))
 		if err != nil {
 			return err
@@ -163,16 +164,18 @@ func insertMediaToDb(mediaPath string) error {
 		return b.Put([]byte(mediaItem.FileName), encoded)
 	})
 
+	return mediaItem, err
+
 }
 
 func deleteMedia(fileName []string) error {
-	return db.Update(func(tx *bbolt.Tx) error {
+	return mediaDB.Update(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket([]byte("MediaItems"))
 		if bucket == nil {
 			return nil
 		}
 		for _, name := range fileName {
-			mediaItem, err := getMediaItem(db, name)
+			mediaItem, err := getMediaItem(mediaDB, name)
 			if err != nil {
 				return err
 			}
@@ -196,7 +199,7 @@ func deleteMedia(fileName []string) error {
 }
 
 func printDatabaseLength() {
-	err := db.View(func(tx *bbolt.Tx) error {
+	err := mediaDB.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte("MediaItems"))
 		if b == nil {
 			return nil
@@ -211,7 +214,7 @@ func printDatabaseLength() {
 }
 
 func clearDb() {
-	err := db.Update(func(tx *bbolt.Tx) error {
+	err := mediaDB.Update(func(tx *bbolt.Tx) error {
 		return tx.DeleteBucket([]byte("MediaItems"))
 	})
 	if err != nil {
@@ -240,7 +243,7 @@ func isFileallreadyExistsInDb(newFilePath string) (alreadyExists bool, existName
 	if err != nil {
 		return false, ""
 	}
-	err = db.View(func(tx *bbolt.Tx) error {
+	err = mediaDB.View(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket([]byte("MediaItems"))
 		if bucket == nil {
 			return nil
@@ -259,6 +262,10 @@ func isFileallreadyExistsInDb(newFilePath string) (alreadyExists bool, existName
 		})
 	})
 
+	if err != nil {
+		log.Println(err)
+	}
+
 	return alreadyExists, existName
 }
 
@@ -266,7 +273,7 @@ func getMediaItems(page, pageSize int, sortBy, filterBy, sortOrder string) ([]Me
 	var mediaItems []MediaItem
 	var totalFiles int
 
-	err := db.View(func(tx *bbolt.Tx) error {
+	err := mediaDB.View(func(tx *bbolt.Tx) error {
 
 		b := tx.Bucket([]byte("MediaItems"))
 		if b == nil {
@@ -411,7 +418,7 @@ func testDuplicateInserting() {
 
 	// Example usage
 	originalFileName := "sunset.jpg"
-	uniqueFileName, err := generateUniqueFileName(db, originalFileName)
+	uniqueFileName, err := generateUniqueFileName(mediaDB, originalFileName)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -422,7 +429,7 @@ func testDuplicateInserting() {
 		// ... other fields ...
 	}
 
-	err = storeMediaItem(db, mediaItem)
+	err = storeMediaItem(mediaDB, mediaItem)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -431,7 +438,7 @@ func testDuplicateInserting() {
 }
 
 func printDatabaseMediaItems() {
-	err := db.View(func(tx *bbolt.Tx) error {
+	err := mediaDB.View(func(tx *bbolt.Tx) error {
 		fmt.Println("Database Media Files:")
 		fmt.Println("---------------------")
 		return tx.ForEach(func(name []byte, b *bbolt.Bucket) error {
@@ -449,17 +456,17 @@ func printDatabaseMediaItems() {
 	}
 }
 
-func getMediaItem(db *bbolt.DB, uniqueID string) (*MediaItem, error) {
+func getMediaItem(db *bbolt.DB, fileName string) (*MediaItem, error) {
 	var mediaItem MediaItem
 	err := db.View(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket([]byte("MediaItems"))
 		if bucket == nil {
-			return fmt.Errorf("Bucket MediaItems not found")
+			return fmt.Errorf("bucket mediaItems not found")
 		}
 
-		data := bucket.Get([]byte(uniqueID))
+		data := bucket.Get([]byte(fileName))
 		if data == nil {
-			return fmt.Errorf("No file found with ID: %s", uniqueID)
+			return fmt.Errorf("No file found with ID: %s", fileName)
 		}
 
 		return json.Unmarshal(data, &mediaItem)
@@ -468,6 +475,39 @@ func getMediaItem(db *bbolt.DB, uniqueID string) (*MediaItem, error) {
 		return nil, err
 	}
 	return &mediaItem, nil
+}
+func updateMediaItem(db *bbolt.DB, mediaItem *MediaItem) error {
+	// not doing nothing yet as i see:
+	return db.Update(func(tx *bbolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte("MediaItems"))
+		if err != nil {
+			return err
+		}
+		encoded, err := json.Marshal(mediaItem)
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte(mediaItem.FileName), encoded)
+	})
+}
+
+func getbiggestClusterGroup() []MediaItem {
+	items, err := getClusteringByFrequency()
+	if err != nil {
+		log.Fatal(err)
+	}
+	mediaItems := []MediaItem{}
+	for _, mediaID := range strings.Split(items[0].MediaIDs, ",") {
+		mediaItem, err := getMediaItem(mediaDB, mediaID)
+		if err != nil {
+			log.Fatal(err)
+			continue
+		}
+		mediaItems = append(mediaItems, *mediaItem)
+
+	}
+	return mediaItems
+
 }
 
 // type ExifTagNames struct {

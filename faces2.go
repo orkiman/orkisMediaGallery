@@ -1,13 +1,22 @@
 package main
 
 import (
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"image"
+	"log"
 	"path/filepath"
+	"strconv"
+	"strings"
+
+	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/yalue/onnxruntime_go"
 	"gocv.io/x/gocv"
 )
+
+var embeddingsDb *sql.DB
 
 func prepareInputForFaceRecognition(face gocv.Mat) (*onnxruntime_go.Tensor[float32], error) {
 	// Define the expected input size
@@ -107,7 +116,7 @@ func generateEmbedding(face gocv.Mat) ([]float32, error) {
 	return embedding, nil
 }
 
-func generateAndStoreFaceEmbedding(img gocv.Mat, face image.Rectangle, mediaID int64) error {
+func generateAndStoreFaceEmbedding(img gocv.Mat, face image.Rectangle, mediaID string) error {
 	// Extract face ROI
 	faceROI := img.Region(face)
 	defer faceROI.Close()
@@ -124,17 +133,14 @@ func generateAndStoreFaceEmbedding(img gocv.Mat, face image.Rectangle, mediaID i
 	if err != nil {
 		return fmt.Errorf("failed to generate embedding: %w", err)
 	}
+	return insertEmbedding(mediaID, embedding)
 
-	// TODO: Implement Milvus storage
-	// faceID := fmt.Sprintf("face_%d", len(embedding))
-	// todo: save embedding with mediaId(mediaName) in milvus
-	return nil
 }
 
-func ProcessMediaItem(item *MediaItem) {
+func ProcessMediaItemFaces(item *MediaItem) {
 	if item.MediaType == "image" {
 		img := gocv.IMRead(filepath.Join(mediaDir, item.FileName), gocv.IMReadColor)
-		processImage(img, item.ID)
+		processImage(img, item.FileName)
 	} else if item.MediaType == "video" {
 		processVideo(item)
 	}
@@ -174,13 +180,13 @@ func processVideo(item *MediaItem) error {
 				}
 				return fmt.Errorf("error reading frame %d", frameCount)
 			}
-			processImage(frame, item.ID)
+			processImage(frame, item.FileName)
 		}
 	}
 	return nil
 }
 
-func processImage(img gocv.Mat, mediaID int64) {
+func processImage(img gocv.Mat, mediaID string) {
 	// Your face detection code...
 	// img := gocv.IMRead(filepath.Join(mediaDir, mediaItem.FileName), gocv.IMReadColor)
 	if img.Empty() {
@@ -240,4 +246,147 @@ func getFaceRects(img gocv.Mat) ([]image.Rectangle, error) {
 	return faceRects, nil
 	// gocv.IMWrite("output.jpg", img)
 	// fmt.Println("Face detection and embedding generation completed.")
+}
+
+func openEmbeddingsDb() *sql.DB {
+	// Open SQLite database
+	// var err error
+	embeddingsDb, err := sql.Open("sqlite3", "./embeddings.db")
+	if err != nil {
+		log.Fatal(err)
+		return nil
+	}
+	// Create table if not exists
+	statement, err := embeddingsDb.Prepare("CREATE TABLE IF NOT EXISTS embeddings (media_id TEXT, face_embedding BLOB)")
+	if err != nil {
+		log.Fatal(err)
+	}
+	statement.Exec()
+	return embeddingsDb
+}
+
+// func closeEmbeddingsDb(clusteringDb *sql.DB) {
+// 	// Close database
+// 	err := clusteringDb.Close()
+// 	if err != nil {
+// 		log.Fatal(err)
+// 	}
+// }
+
+func insertEmbedding(mediaID string, embedding []float32) error {
+	fmt.Println("inserting embedding: ", mediaID, " : ", embedding)
+	// Convert embedding to byte array
+	embeddingBytes, err := json.Marshal(embedding)
+	if err != nil {
+		return err
+	}
+	// Insert embedding into database
+	_, err = embeddingsDb.Exec("INSERT INTO embeddings VALUES (?, ?)", mediaID, embeddingBytes)
+	if err != nil {
+		return err
+	}
+	fmt.Println("embedding inserted successfully")
+	return nil
+}
+
+func getClusteringByFrequency() ([]struct {
+	ClusterID int    "json:\"clusterID\""
+	MediaIDs  string "json:\"mediaIDs\""
+}, error) {
+	embeddingsDb := openEmbeddingsDb()
+	defer embeddingsDb.Close()
+	// Prepare the SQL query
+	query := `
+		SELECT cluster_id, GROUP_CONCAT(media_ids) AS media_ids 
+		FROM clusters 
+		GROUP BY cluster_id
+		ORDER BY COUNT(media_ids) DESC
+	`
+	// Execute the query
+	rows, err := embeddingsDb.Query(query)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rows.Close()
+
+	var result []struct {
+		ClusterID int    `json:"clusterID"`
+		MediaIDs  string `json:"mediaIDs"`
+	}
+
+	for rows.Next() {
+		var clusterID int
+		var mediaIDs string
+		err := rows.Scan(&clusterID, &mediaIDs)
+		if err != nil {
+			log.Fatal(err)
+		}
+		result = append(result, struct {
+			ClusterID int    `json:"clusterID"`
+			MediaIDs  string `json:"mediaIDs"`
+		}{ClusterID: clusterID, MediaIDs: mediaIDs})
+
+	}
+	if err := rows.Err(); err != nil {
+		log.Fatal(err)
+	}
+	log.Println("getClusteringByFrequency: \n", result)
+	return result, err
+
+}
+
+func getClustersAndUpdatefacesDataInMediaDb() {
+
+	embeddingsDb := openEmbeddingsDb()
+	defer embeddingsDb.Close()
+
+	// Prepare the SQL query
+	query := `
+		SELECT cluster_id, GROUP_CONCAT(media_ids) AS media_ids 
+		FROM clusters 
+		GROUP BY cluster_id
+		ORDER BY COUNT(media_ids) DESC
+	`
+
+	// Execute the query
+	rows, err := embeddingsDb.Query(query)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rows.Close()
+
+	// Print the output
+	fmt.Println("Clustered Data:")
+	for rows.Next() {
+		var clusterID int
+		var mediaIDs string
+		err := rows.Scan(&clusterID, &mediaIDs)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// Split the concatenated media IDs
+		mediaIDList := strings.Split(mediaIDs, ",")
+		for _, mediaId := range mediaIDList {
+			var mediaItem *MediaItem
+			mediaItem, err = getMediaItem(mediaDB, mediaId)
+
+			if err != nil {
+				log.Fatal(err)
+			}
+			mediaItem.FaceIDs = append(mediaItem.FaceIDs, strconv.Itoa(clusterID))
+
+			updateMediaItem(mediaDB, mediaItem)
+			// todo : update all photos with cluster idmediaId
+			// maybe prepare a list of common clusters descending order
+			// Update the faces data in the media table
+
+		}
+
+		fmt.Printf("Cluster %d: %s\n", clusterID, strings.Join(mediaIDList, ", "))
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Fatal(err)
+	}
 }
