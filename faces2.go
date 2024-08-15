@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
+	"image/color"
 	"log"
+	"math"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -18,7 +20,7 @@ import (
 
 var embeddingsDb *sql.DB
 
-func prepareInputForFaceRecognition(face gocv.Mat) (*onnxruntime_go.Tensor[float32], error) {
+func prepareInputForFaceRecognitionOriginal(face gocv.Mat) (*onnxruntime_go.Tensor[float32], error) {
 	// Define the expected input size
 	inputSize := image.Pt(112, 112)
 
@@ -37,6 +39,57 @@ func prepareInputForFaceRecognition(face gocv.Mat) (*onnxruntime_go.Tensor[float
 
 	// Split the image into separate channels
 	channels := gocv.Split(resizedFace)
+	defer func() {
+		for _, channel := range channels {
+			channel.Close()
+		}
+	}()
+
+	// Create input tensor with shape (1, 3, 112, 112)
+	inputShape := onnxruntime_go.NewShape(1, 3, 112, 112)
+	inputTensor, err := onnxruntime_go.NewEmptyTensor[float32](inputShape)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create input tensor: %w", err)
+	}
+
+	// Populate the tensor with image data
+	inputData := inputTensor.GetData()
+	channelSize := inputSize.X * inputSize.Y
+	for i := 0; i < 3; i++ {
+		channelData, err := channels[i].DataPtrFloat32()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get channel data: %w", err)
+		}
+		copy(inputData[i*channelSize:(i+1)*channelSize], channelData)
+	}
+
+	return inputTensor, nil
+}
+func prepareInputForFaceRecognition(face gocv.Mat) (*onnxruntime_go.Tensor[float32], error) {
+	// Define the expected input size
+	inputSize := image.Pt(112, 112)
+
+	// Resize the image to 112x112 if necessary
+	resizedFace := gocv.NewMat()
+	defer resizedFace.Close()
+	if face.Cols() != inputSize.X || face.Rows() != inputSize.Y {
+		gocv.Resize(face, &resizedFace, inputSize, 0, 0, gocv.InterpolationLinear)
+	} else {
+		face.CopyTo(&resizedFace)
+	}
+
+	// Convert to float32
+	resizedFace.ConvertTo(&resizedFace, gocv.MatTypeCV32F)
+
+	// Normalize to range [-1, 1]
+	normalizedFace := gocv.NewMat()
+	defer normalizedFace.Close()
+	resizedFace.ConvertTo(&normalizedFace, gocv.MatTypeCV32F)
+	normalizedFace.DivideFloat(127.5)
+	normalizedFace.SubtractFloat(1.0)
+
+	// Split the image into separate channels (BGR order)
+	channels := gocv.Split(normalizedFace)
 	defer func() {
 		for _, channel := range channels {
 			channel.Close()
@@ -117,9 +170,15 @@ func generateEmbedding(face gocv.Mat) ([]float32, error) {
 }
 
 func generateAndStoreFaceEmbedding(img gocv.Mat, face image.Rectangle, mediaID string) error {
-	// Extract face ROI
 	faceROI := img.Region(face)
 	defer faceROI.Close()
+
+	// Save the image immediately instead of deferring
+	outPath := fmt.Sprintf("face_%s.jpg", mediaID)
+	success := gocv.IMWrite(outPath, faceROI)
+	if !success {
+		return fmt.Errorf("failed to save image: %s", outPath)
+	}
 
 	// Preprocess: resize to 112x112, convert to float32, normalize
 	processedFace := gocv.NewMat()
@@ -133,8 +192,22 @@ func generateAndStoreFaceEmbedding(img gocv.Mat, face image.Rectangle, mediaID s
 	if err != nil {
 		return fmt.Errorf("failed to generate embedding: %w", err)
 	}
+	embedding = normalizeEmbedding(embedding)
 	return insertEmbedding(mediaID, embedding)
 
+}
+
+func normalizeEmbedding(embedding []float32) []float32 {
+	var sum float32
+	for _, v := range embedding {
+		sum += v * v
+	}
+	magnitude := float32(math.Sqrt(float64(sum)))
+	normalized := make([]float32, len(embedding))
+	for i, v := range embedding {
+		normalized[i] = v / magnitude
+	}
+	return normalized
 }
 
 func ProcessMediaItemFaces(item *MediaItem) {
@@ -243,9 +316,14 @@ func getFaceRects(img gocv.Mat) ([]image.Rectangle, error) {
 
 		}
 	}
+
+	// Draw rectangles around faces
+	for _, faceRect := range faceRects {
+		gocv.Rectangle(&img, faceRect, color.RGBA{0, 255, 0, 0}, 2)
+	}
+	gocv.IMWrite("output.jpg", img)
+
 	return faceRects, nil
-	// gocv.IMWrite("output.jpg", img)
-	// fmt.Println("Face detection and embedding generation completed.")
 }
 
 func openEmbeddingsDb() *sql.DB {
@@ -389,4 +467,7 @@ func getClustersAndUpdatefacesDataInMediaDb() {
 	if err := rows.Err(); err != nil {
 		log.Fatal(err)
 	}
+}
+func testFaceDetection2() {
+	getFaceRects(gocv.IMRead("/home/orkiman/vscodeProjects/python/pyFace2/facesDis/or4.jpg", gocv.IMReadColor))
 }

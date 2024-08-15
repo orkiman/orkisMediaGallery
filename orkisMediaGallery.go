@@ -3,6 +3,7 @@ package main
 // name change test
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -16,7 +17,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/disintegration/imaging"
 	"github.com/dsoprea/go-exif/v3"
@@ -77,7 +77,11 @@ func init() {
 	}
 }
 func main() {
+	// testFaceDetection2()
+	// return
 	deleteAll()
+	fmt.Println("Files deleted successfully")
+	// return
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	// facesMain()
@@ -105,9 +109,6 @@ func main() {
 		return
 	}
 	defer mediaDb.Close()
-
-	// fmt.Println("Files deleted successfully")
-	// return
 
 	// err = deleteMedia([]string{"20231211_120532.jpg"})
 	// if err != nil {
@@ -172,6 +173,7 @@ func deleteAll() {
 	os.RemoveAll(duplicatesDir)
 	os.RemoveAll(binDir)
 	os.RemoveAll("media.db")
+	os.RemoveAll("faces.db")
 	// clearDb()
 }
 
@@ -386,46 +388,86 @@ func checkAuth(username, password string) bool {
 	return username == creds.Username && password == creds.Password
 }
 
+// func orginizeNewFilesConcurrently() (processedFilesCounter int, err error) {
+// 	// not working with onnx for now
+
+// 	embeddingsDb = openEmbeddingsDb()
+// 	defer embeddingsDb.Close()
+// 	numWorkers := 3 // runtime.NumCPU()
+// 	semaphore := make(chan struct{}, numWorkers)
+// 	var wg sync.WaitGroup
+// 	errChan := make(chan error, numWorkers)
+
+// 	go func() {
+// 		defer close(errChan)
+// 		err := filepath.WalkDir(uploadDir, func(path string, entry fs.DirEntry, err error) error {
+// 			if err != nil {
+// 				return err
+// 			}
+
+// 			if !entry.IsDir() {
+// 				wg.Add(1)
+// 				go func(path string) {
+// 					defer wg.Done()
+// 					semaphore <- struct{}{}
+// 					defer func() { <-semaphore }()
+// 					if err := processFile(path, ); err != nil {
+// 						errChan <- err
+// 					}
+// 					processedFilesCounter++
+// 				}(path)
+// 			}
+
+// 			return nil
+// 		})
+
+// 		if err != nil {
+// 			errChan <- err
+// 		}
+
+// 		wg.Wait()
+// 	}()
+
+// 	// Collect and return the first error, if any
+// 	for err := range errChan {
+// 		return processedFilesCounter, err
+// 	}
+
+// 	// printDatabaseMediaItems()
+// 	return processedFilesCounter, nil
+// }
+
 func orginizeNewFiles() (processedFilesCounter int, err error) {
-	embeddingsDb := openEmbeddingsDb()
+	embeddingsDb = openEmbeddingsDb()
 	defer embeddingsDb.Close()
-	numWorkers := 3 // runtime.NumCPU()
-	semaphore := make(chan struct{}, numWorkers)
-	var wg sync.WaitGroup
-	errChan := make(chan error, numWorkers)
 
-	go func() {
-		defer close(errChan)
-		err := filepath.WalkDir(uploadDir, func(path string, entry fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
+	// Open the SQLite database
+	facesDbSqlite, err := sql.Open("sqlite3", "./faces.db")
+	if err != nil {
+		panic(fmt.Sprintf("failed to open database: %v", err))
+	}
+	err = createFacesUnprocessedMediaItemsTable(facesDbSqlite)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create facesUnprocessedMediaItems table: %v", err))
+	}
+	defer facesDbSqlite.Close()
 
-			if !entry.IsDir() {
-				wg.Add(1)
-				go func(path string) {
-					defer wg.Done()
-					semaphore <- struct{}{}
-					defer func() { <-semaphore }()
-					if err := processFile(path); err != nil {
-						errChan <- err
-					}
-					processedFilesCounter++
-				}(path)
-			}
-
-			return nil
-		})
-
+	err = filepath.WalkDir(uploadDir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
-			errChan <- err
+			return err
 		}
 
-		wg.Wait()
-	}()
+		if !entry.IsDir() {
+			if err := processFile(path, facesDbSqlite); err != nil {
+				return err
+			}
+			processedFilesCounter++
+		}
 
-	// Collect and return the first error, if any
-	for err := range errChan {
+		return nil
+	})
+
+	if err != nil {
 		return processedFilesCounter, err
 	}
 
@@ -433,7 +475,7 @@ func orginizeNewFiles() (processedFilesCounter int, err error) {
 	return processedFilesCounter, nil
 }
 
-func processFile(originalFilePath string) error {
+func processFile(originalFilePath string, facesDbSqlite *sql.DB) error {
 	fileExists, exsistingName := isFileallreadyExistsInDb(originalFilePath)
 	if fileExists {
 		err := os.Rename(originalFilePath, filepath.Join(duplicatesDir,
@@ -482,7 +524,7 @@ func processFile(originalFilePath string) error {
 
 	mediaItem, err := insertMediaToDb(filepath.Join(mediaDir, uniqueName))
 	// _, err = insertMediaToDb(filepath.Join(mediaDir, uniqueName))
-	ProcessMediaItemFaces(&mediaItem)
+	err = insertMediaToFacesUnprocessedMediaItemsTable(&mediaItem, facesDbSqlite)
 
 	return err
 }
