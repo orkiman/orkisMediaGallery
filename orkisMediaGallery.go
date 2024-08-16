@@ -438,8 +438,8 @@ func checkAuth(username, password string) bool {
 // }
 
 func orginizeNewFiles() (processedFilesCounter int, err error) {
-	embeddingsDb = openEmbeddingsDb()
-	defer embeddingsDb.Close()
+	// embeddingsDb = openEmbeddingsDb()
+	// defer embeddingsDb.Close()
 
 	// Open the SQLite database
 	facesDbSqlite, err := sql.Open("sqlite3", "./faces.db")

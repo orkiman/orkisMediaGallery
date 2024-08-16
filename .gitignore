@@ -2,3 +2,5 @@
 /staticFiles/**
 staticFiles/
 myDeepFaceVenv/
+media.db
+faces.db
