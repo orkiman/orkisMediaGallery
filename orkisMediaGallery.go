@@ -78,10 +78,14 @@ func init() {
 }
 func main() {
 	// testFaceDetection2()
-	// return
+
+	testViewFaces()
+	return
+
 	deleteAll()
 	fmt.Println("Files deleted successfully")
 	// return
+
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	// facesMain()
@@ -443,6 +447,7 @@ func orginizeNewFiles() (processedFilesCounter int, err error) {
 
 	// Open the SQLite database
 	facesDbSqlite, err := sql.Open("sqlite3", "./faces.db")
+	defer facesDbSqlite.Close()
 	if err != nil {
 		panic(fmt.Sprintf("failed to open database: %v", err))
 	}
@@ -450,7 +455,6 @@ func orginizeNewFiles() (processedFilesCounter int, err error) {
 	if err != nil {
 		panic(fmt.Sprintf("failed to create facesUnprocessedMediaItems table: %v", err))
 	}
-	defer facesDbSqlite.Close()
 
 	err = filepath.WalkDir(uploadDir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {

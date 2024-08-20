@@ -5,6 +5,23 @@ import cv2
 from deepface import DeepFace
 from deepface.modules import verification
 import numpy as np
+import pickle
+
+# tables structure here : https://docs.google.com/document/d/1PrIiOg6oL_UbHzmdwUrBh9yQDj1p-Xr8mwjz3YOX8Bk/edit?usp=sharing
+thresholds = {
+    # "VGG-Face": {"cosine": 0.40, "euclidean": 0.60, "euclidean_l2": 0.86}, # 2622d
+    "VGG-Face": {"cosine": 0.68, "euclidean": 1.17, "euclidean_l2": 1.17,},  # 4096d - tuned with LFW
+    "Facenet": {"cosine": 0.40, "euclidean": 10, "euclidean_l2": 0.80},
+    "Facenet512": {"cosine": 0.30, "euclidean": 23.56, "euclidean_l2": 1.04},
+    "ArcFace": {"cosine": 0.68, "euclidean": 4.15, "euclidean_l2": 1.13},
+    "Dlib": {"cosine": 0.07, "euclidean": 0.6, "euclidean_l2": 0.4},
+    "SFace": {"cosine": 0.593, "euclidean": 10.734, "euclidean_l2": 1.055},
+    "OpenFace": {"cosine": 0.10, "euclidean": 0.55, "euclidean_l2": 0.55},
+    "DeepFace": {"cosine": 0.23, "euclidean": 64, "euclidean_l2": 0.64},
+    "DeepID": {"cosine": 0.015, "euclidean": 45, "euclidean_l2": 0.17},
+    "GhostFaceNet": {"cosine": 0.65, "euclidean": 35.71, "euclidean_l2": 1.10},
+    }
+models = ["VGG-Face", "Facenet", "Facenet512", "ArcFace", "Dlib", "SFace", "OpenFace", "DeepFace", "DeepID", "GhostFaceNet"]
 
 def get_unmapped_media_paths():
     conn = sqlite3.connect('faces.db')
@@ -34,7 +51,7 @@ def extract_frames_from_movie(movie_path, interval=5):
             break
         
         if frame_count % interval == 0:
-            frames.append(frame)
+            frames.append(frame, frame_count)
         
         frame_count += 1
     
@@ -98,96 +115,30 @@ def test2FacesImage():
     distance = verification.find_cosine_distance(e1[0]['embedding'], e2[0]['embedding'])
     print("two images each with one face verification.find_cosine_distance: ", distance)
 
-    
-
-        
-
-
-
-def process_new_image_old_using32float(cursor, image, image_path, conn):
-    
-    embeddings_data = DeepFace.represent(img_path=image, model_name="ArcFace", enforce_detection=False)
-    for data in embeddings_data:
-        embedding = np.array(data['embedding'], dtype=np.float32)
-        facial_area = data['facial_area']
-        
-        cursor.execute("SELECT personID, averageEmbedding, embeddingCount FROM FaceGroups")
-        rows = cursor.fetchall()
-        print(f"Number of rows fetched: {len(rows)}")
-
-        distances = []
-        for row in rows:
-            stored_embedding = np.frombuffer(row[1], dtype=np.float32)
-            distance = verification.find_cosine_distance(stored_embedding, embedding)
-            distances.append(distance)
-        
-        if distances:
-            min_distance_idx = np.argmin(distances)
-            if distances[min_distance_idx] < 0.68:  # Adjust threshold as needed 0.68
-                # Update existing person
-                personID = rows[min_distance_idx][0]
-                current_avg_embedding = np.frombuffer(rows[min_distance_idx][1], dtype=np.float32)
-                num_embeddings = rows[min_distance_idx][2]
-                
-                new_average_embedding = (current_avg_embedding * num_embeddings + embedding) / (num_embeddings + 1)
-                
-                cursor.execute("SELECT imagePaths, facialArea FROM FaceGroups WHERE personID=?", (personID,))
-                image_paths, facial_areas = cursor.fetchone()
-                image_paths = json.loads(image_paths)
-                image_paths.append(image_path)
-                facial_areas = json.loads(facial_areas)
-
-                # # Ensure that facial_areas is a list
-                # if not isinstance(facial_areas, list):
-                #     facial_areas = [facial_areas]  # Convert to list if it's not already
-
-                facial_areas.append(facial_area)
-                # image_paths = json.loads(cursor.fetchone()[0])
-                # if image_path:
-                #     image_paths.append(image_path)
-
-                # facial_areas = json.loads(cursor.fetchone()[1])
-                # facial_areas.append(facial_area)
-                
-                cursor.execute("UPDATE FaceGroups SET averageEmbedding=?, imagePaths=?, facialArea=?, embeddingCount=? WHERE personID=?", 
-                               (new_average_embedding.tobytes(), json.dumps(image_paths), json.dumps(facial_areas), num_embeddings + 1, personID))                
-            else:
-                # Insert as a new person
-                cursor.execute("INSERT INTO FaceGroups (averageEmbedding, imagePaths, facialArea, embeddingCount) VALUES (?, ?, ?, ?)", 
-                               (embedding.tobytes(), json.dumps([image_path] if image_path else []), json.dumps([facial_area]), 1))
-        else:
-            # Insert as the first person
-            cursor.execute("INSERT INTO FaceGroups (averageEmbedding, imagePaths, facialArea, embeddingCount) VALUES (?, ?, ?, ?)", 
-                           (embedding.tobytes(), json.dumps([image_path] if image_path else []), json.dumps([facial_area]), 1))
-        conn.commit()
-
 
 def process_new_image(cursor, image, image_path, conn):
     # Get embeddings from DeepFace
-    embeddings_data = DeepFace.represent(img_path=image, model_name="ArcFace", enforce_detection=False)
+    model_name = "Dlib"
+    embeddings_data = DeepFace.represent(img_path=image, model_name=model_name, enforce_detection=False, detector_backend="retinaface")
     
     for data in embeddings_data:
-        # Directly use the embedding as it is
         embedding = data['embedding']
-
         facial_area = data['facial_area']
         
         # Fetch all existing face groups from the database
-        cursor.execute("SELECT personID, averageEmbedding, embeddingCount FROM FaceGroups")
+        cursor.execute("SELECT personID, averageEmbedding, embeddingCount, imagePaths, facialArea FROM FaceGroups")
         rows = cursor.fetchall()
-        print(f"Number of rows fetched: {len(rows)}")
 
         distances = []
         for row in rows:
-            # Convert the stored embedding back from bytes to a numpy array (float64 by default)
             stored_embedding = np.frombuffer(row[1], dtype=np.float64)
-            # Calculate the distance between the current embedding and the stored embeddings
             distance = verification.find_cosine_distance(stored_embedding, embedding)
             distances.append(distance)
         
         if distances:
             min_distance_idx = np.argmin(distances)
-            if distances[min_distance_idx] < 0.68:  # Adjust threshold as needed
+            threshold = thresholds[model_name]['cosine']
+            if distances[min_distance_idx] < threshold - 0.01: #for dlib 0.069 worked better then 0.07  # Adjust threshold as needed
                 # Update existing person
                 personID = rows[min_distance_idx][0]
                 current_avg_embedding = np.frombuffer(rows[min_distance_idx][1], dtype=np.float64)
@@ -197,27 +148,109 @@ def process_new_image(cursor, image, image_path, conn):
                 new_average_embedding = (current_avg_embedding * num_embeddings + embedding) / (num_embeddings + 1)
                 
                 # Retrieve and update the image paths and facial areas
-                cursor.execute("SELECT imagePaths, facialArea FROM FaceGroups WHERE personID=?", (personID,))
-                image_paths, facial_areas = cursor.fetchone()
-                image_paths = json.loads(image_paths)
-                image_paths.append(image_path)
-                facial_areas = json.loads(facial_areas)
+                image_paths = json.loads(rows[min_distance_idx][3])
+                facial_areas = json.loads(rows[min_distance_idx][4])
+                
+                if image_path not in image_paths:
+                    image_paths.append(image_path)
                 facial_areas.append(facial_area)
                 
+                # Calculate the unique image path count
+                unique_image_path_count = len(set(image_paths))
+                
                 # Update the database with the new information
-                cursor.execute("UPDATE FaceGroups SET averageEmbedding=?, imagePaths=?, facialArea=?, embeddingCount=? WHERE personID=?", 
-                               (new_average_embedding.tobytes(), json.dumps(image_paths), json.dumps(facial_areas), num_embeddings + 1, personID))
+                cursor.execute("UPDATE FaceGroups SET averageEmbedding=?, imagePaths=?, facialArea=?, embeddingCount=?, uniqueImagePathCount=? WHERE personID=?", 
+                               (new_average_embedding.tobytes(), json.dumps(image_paths), json.dumps(facial_areas), num_embeddings + 1, unique_image_path_count, personID))
             else:
                 # Insert as a new person
-                cursor.execute("INSERT INTO FaceGroups (averageEmbedding, imagePaths, facialArea, embeddingCount) VALUES (?, ?, ?, ?)", 
-                               (np.array(embedding, dtype=np.float64).tobytes(), json.dumps([image_path] if image_path else []), json.dumps([facial_area]), 1))
+                cursor.execute("INSERT INTO FaceGroups (averageEmbedding, imagePaths, facialArea, embeddingCount, uniqueImagePathCount) VALUES (?, ?, ?, ?, ?)", 
+                               (np.array(embedding, dtype=np.float64).tobytes(), json.dumps([image_path] if image_path else []), json.dumps([facial_area]), 1, 1))
         else:
             # Insert as the first person
-            cursor.execute("INSERT INTO FaceGroups (averageEmbedding, imagePaths, facialArea, embeddingCount) VALUES (?, ?, ?, ?)", 
-                           (np.array(embedding, dtype=np.float64).tobytes(), json.dumps([image_path] if image_path else []), json.dumps([facial_area]), 1))
+            cursor.execute("INSERT INTO FaceGroups (averageEmbedding, imagePaths, facialArea, embeddingCount, uniqueImagePathCount) VALUES (?, ?, ?, ?, ?)", 
+                           (np.array(embedding, dtype=np.float64).tobytes(), json.dumps([image_path] if image_path else []), json.dumps([facial_area]), 1, 1))
         
         # Commit the changes to the database
         conn.commit()
+
+
+def clusterEmbeddings(cursor, conn):
+    cursor.execute("SELECT * FROM face_embeddings WHERE PERSONID IS NULL")
+    face_embeddings_rows = cursor.fetchall()
+    model_name = "Dlib"
+    for row in face_embeddings_rows:
+        # Deserialize the stored binary data back into a numpy array
+        face_embedding = pickle.loads(row["embedding"])
+        cursor.execute("SELECT personID, avgEmbedding, embeddingCount from Persons Table ")
+        personsID_rows = cursor.fetchall()
+
+        distances = []
+        for personID_row in personsID_rows:
+            personAvgEmbedding = pickle.loads(personID_row["avgEmbedding"]) #  todo store it with pickle 
+            personID = personID_row["personID"]
+            embeddingCount = personID_row["embeddingCount"]
+            distance = verification.find_cosine_distance(personAvgEmbedding, face_embedding)
+            distances.append((personID, distance, embeddingCount))
+        
+        if distances:
+            min_distance_idx = min(enumerate(distances), key=lambda x: x[1][1])[0]
+            threshold = thresholds[model_name]['cosine']
+            if distances[min_distance_idx][1] < threshold - 0.01: #for dlib 0.069 worked better then 0.07  # Adjust threshold as needed
+                #update person table
+                personID = distances[min_distance_idx][0]
+                personAvgEmbedding = personsID_rows[min_distance_idx][1]
+                oldEmbeddingsCount = personsID_rows[min_distance_idx][2]
+                newEmbeddingsCount = oldEmbeddingsCount + 1
+                newAverageEmbedding = (personAvgEmbedding * oldEmbeddingsCount + face_embedding) / (newEmbeddingsCount)
+                serialized_average_embedding = pickle.dumps(newAverageEmbedding)
+
+                cursor.execute("UPDATE Persons SET avgEmbedding=?, embeddingCount=? WHERE personID=?", 
+                               (serialized_average_embedding, newEmbeddingsCount, personID))
+                
+                # Update the personID in the face_embeddings table
+                cursor.execute("UPDATE face_embeddings SET personID=? WHERE embeddingID=?",
+                               (personID, row["embeddingID"]))
+            else:
+                #Insert as a new person
+                cursor.execute("INSERT INTO Persons (avgEmbedding, embeddingCount) VALUES (?, ?)", 
+                               (pickle.dumps(face_embedding), 1))
+                
+                # Insert the new personID in the face_embeddings table
+                personID = cursor.lastrowid
+                cursor.execute("UPDATE face_embeddings SET personID=? WHERE embeddingID=?",
+                               (personID, row["embeddingID"]))
+        else:
+            #Insert as the first person
+            cursor.execute("INSERT INTO Persons (avgEmbedding, embeddingCount) VALUES (?, ?)", 
+                           (pickle.dumps(face_embedding), 1))
+            
+            # Insert the new personID in the face_embeddings table
+            personID = cursor.lastrowid
+            cursor.execute("UPDATE face_embeddings SET personID=? WHERE embeddingID=?",
+                           (personID, row["embeddingID"]))
+
+        # Commit the changes to the database
+        conn.commit()
+                 
+    
+
+
+
+
+
+def create_persons_table(cursor, conn):
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS Persons (
+        personID INTEGER PRIMARY KEY AUTOINCREMENT,
+        avgEmbedding BLOB,
+        sampleEmbedding INTEGER,
+        embeddingCount INTEGER
+    )
+    ''')
+    conn.commit()
+
+
+
 
 def extractFacesFromDb(conn, cursor):
     cursor.execute("SELECT * FROM FaceGroups")
@@ -248,45 +281,98 @@ def extractFacesFromDb(conn, cursor):
             else:
                 print(f"Failed to read image at path: {imagePath}")
 
-def main():
-    # testEmbeddingsVsVerify()
-    # test2FacesImage()
-    # exit(0)
+def createFaceEmbeddingsTable(conn, cursor):
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS face_embeddings (
+        embeddingID INTEGER PRIMARY KEY AUTOINCREMENT,
+        embedding BLOB,
+        mediaPath TEXT,
+        facial_area TEXT,
+        type TEXT,
+        movieFrameNumber TEXT,
+        personID INTEGER
+    )
+    ''')
+                   
+    conn.commit()
+
+def extractAndSaveEmbeddingsFromImage(conn, cursor, image, media_path, mediaType, movieFrameNumber = None):
+    # Get embeddings from DeepFace
+    model_name = "Dlib"
+    embeddings_data = DeepFace.represent(img_path=image, model_name=model_name, enforce_detection=False, detector_backend="retinaface")
+    
+    for data in embeddings_data:
+        embedding = data['embedding']
+        # Serialize the entire numpy array (including dtype) - to get the right format when reading them eg. float64 float32..
+        serialized_embedding = pickle.dumps(embedding)
+        facial_area = data['facial_area']
+        cursor.execute("INSERT INTO face_embeddings (embedding, mediaPath, facial_area, type, movieFrameNumber) VALUES (?, ?, ?, ?, ?)",
+                       serialized_embedding, media_path, json.dumps(facial_area), mediaType, movieFrameNumber)
+
+    conn.commit()
+
+def handleUnprocessedMediaItems(conn, cursor):
+    # this method will 1.get unprocessed MediaItems
+    # 2.extract and save face embeddings in faceEmbeddings table 
+    # 3.cluster them into Persons Table
+
+    # 1. get the unprocessed MediaItems
     facesUnprocessedMediaItems = get_unmapped_media_paths()
     if not facesUnprocessedMediaItems:
         print("No unprocessed media items found.")
         return
+    # 2.iterate each media item and save it's embeddings
+    for media_item in facesUnprocessedMediaItems:
+        id, media_path, media_type = media_item
+        print(f"Processing: {media_path} (Type: {media_type})")
+        if media_type == "image":
+            extractAndSaveEmbeddingsFromImage(conn, cursor, media_path, media_path, media_type)
+        elif media_type == "movie":
+            extracted_frames = extract_frames_from_movie(media_path)
+            for frame, frameNumber in extracted_frames:
+                extractAndSaveEmbeddingsFromImage(conn, cursor, frame, media_path, media_type, frameNumber)        
+    conn.commit()  
+    # 3. cluster embeddings
 
+
+
+
+
+
+
+
+
+
+def main():
+    # testEmbeddingsVsVerify()
+    # test2FacesImage()
+    # exit(0)
+    
+    
     conn = sqlite3.connect('faces.db')
+    conn.row_factory = sqlite3.Row  # This enables column access by name
     cursor = conn.cursor()
 
     
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS FaceGroups (
-        personID INTEGER PRIMARY KEY,
-        averageEmbedding BLOB,
-        imagePaths TEXT,
-        facialArea TEXT,
-        embeddingCount INTEGER
-    )
-    ''')
-    conn.commit()
+    # cursor.execute('''
+    # CREATE TABLE IF NOT EXISTS FaceGroups (
+    #     personID INTEGER PRIMARY KEY,
+    #     averageEmbedding BLOB,
+    #     imagePaths TEXT,
+    #     facialArea TEXT,
+    #     embeddingCount INTEGER,
+    #     uniqueImagePathCount INTEGER  -- New column to track unique image paths
+    # )
+    # ''')
+
+    # conn.commit()
+    createFaceEmbeddingsTable(conn, cursor)
 
     # extractFacesFromDb(conn, cursor)
     # conn.close()
     # exit(0)
 
-    for media_item in facesUnprocessedMediaItems:
-        id, media_path, media_type = media_item
-        print(f"Processing: {media_path} (Type: {media_type})")
-        if media_type == "image":
-            process_new_image(cursor, media_path, media_path, conn)
-        elif media_type == "movie":
-            extracted_frames = extract_frames_from_movie(media_path)
-            for frame in extracted_frames:
-                process_new_image(cursor, frame, media_path, conn)
-        
-        conn.commit()  # Commit after processing each media item
+    
 
     conn.close()
     print("Processing completed.")
