@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
+	"log"
 	"math"
 	"path/filepath"
 
@@ -58,7 +59,7 @@ type FacialArea struct {
 }
 
 func getAllFacesImages(db *sql.DB) ([]gocv.Mat, error) {
-	query := "SELECT COUNT(*) FROM FaceGroups"
+	query := "SELECT COUNT(*) FROM persons"
 	result := db.QueryRow(query)
 	var count int
 	if err := result.Scan(&count); err != nil {
@@ -85,53 +86,45 @@ func getAllFacesImages(db *sql.DB) ([]gocv.Mat, error) {
 	return faceImages, nil
 }
 
-// func getOneFaceForEachPerson(db *sql.DB) ([]gocv.Mat, error) {
-// 	query := "SELECT PersonID, imagePathes FROM FaceGroups ORDER BY "
-
-// getFacesImagesByPersonID retrieves face images for a given personID using GoCV
 func getFacesImagesByPersonID(db *sql.DB, personID int) ([]gocv.Mat, error) {
 	// Query the database for image paths and facial areas
-	var imagePathsJSON, facialAreaJSON string
-	query := "SELECT imagePaths, facialArea FROM FaceGroups WHERE personID=?"
-	err := db.QueryRow(query, personID).Scan(&imagePathsJSON, &facialAreaJSON)
+
+	query := "SELECT mediaPath, facial_area, type FROM face_embeddings WHERE personID=?"
+	// err := db.QueryRow(query, personID).Scan(&mediaPath, &facialAreaJSON)
+	rows, err := db.Query(query, personID)
+
 	if err != nil {
+		log.Fatal(err)
 		return nil, fmt.Errorf("failed to query database: %v", err)
 	}
+	defer rows.Close()
 
-	// Parse JSON arrays
-	var imagePaths []string
-	var facialAreas []FacialArea
-	if err := json.Unmarshal([]byte(imagePathsJSON), &imagePaths); err != nil {
-		return nil, fmt.Errorf("failed to parse image paths: %v", err)
-	}
-	if err := json.Unmarshal([]byte(facialAreaJSON), &facialAreas); err != nil {
-		return nil, fmt.Errorf("failed to parse facial areas: %v", err)
-	}
-
-	// Ensure image paths and facial areas match in length
-	if len(imagePaths) != len(facialAreas) {
-		return nil, fmt.Errorf("mismatched lengths: %d image paths, %d facial areas", len(imagePaths), len(facialAreas))
-	}
-
-	// Load and crop images based on facial areas
 	var faceImages []gocv.Mat
-	for i, path := range imagePaths {
-		// Read the image using GoCV
-		img := gocv.IMRead(path, gocv.IMReadColor)
+	for rows.Next() {
+		var mediaPath, facialAreaJSON, mediaType string
+		if err := rows.Scan(&mediaPath, &facialAreaJSON, &mediaType); err != nil {
+			log.Fatal(err)
+			return nil, fmt.Errorf("failed to scan row: %v", err)
+		}
+		// todo : handle videos
+		if mediaType != "image" {
+			continue
+		}
+
+		// Parse JSON arrays
+		var facialArea FacialArea
+		if err := json.Unmarshal([]byte(facialAreaJSON), &facialArea); err != nil {
+			log.Fatal(err)
+			return nil, fmt.Errorf("failed to parse facial areas: %v", err)
+		}
+
+		img := gocv.IMRead(mediaPath, gocv.IMReadColor)
 		if img.Empty() {
-			return nil, fmt.Errorf("failed to load image from %s", path)
+			return nil, fmt.Errorf("failed to load image from %s", mediaPath)
 		}
 		defer img.Close()
 
 		// Crop the image based on the facial area
-		facialArea := facialAreas[i]
-
-		// // Ensure the facial area is within the image bounds
-		// if facialArea.X < 0 || facialArea.Y < 0 || facialArea.X+facialArea.W > img.Cols() || facialArea.Y+facialArea.H > img.Rows() {
-		// 	fmt.Printf("Invalid facial area for image %s: %v\n", path, facialArea)
-		// 	continue // Skip this image
-		// }
-
 		// Ensure the facial area is within the image bounds
 		if facialArea.X < 0 {
 			facialArea.X = 0
@@ -149,12 +142,15 @@ func getFacesImagesByPersonID(db *sql.DB, personID int) ([]gocv.Mat, error) {
 		croppedImg := img.Region(image.Rect(facialArea.X, facialArea.Y, facialArea.X+facialArea.W, facialArea.Y+facialArea.H))
 		defer croppedImg.Close()
 
-		// Resize the cropped face to 100x100 pixels
+		// Resize the cropped face to 100 pixels height
 		resizedFace := gocv.NewMat()
 		defer resizedFace.Close() // Use defer to ensure it gets released later
-		// Calculate the proportional height based on the desired width
-		newHeight := (facialArea.H * 100) / facialArea.W
-		gocv.Resize(croppedImg, &resizedFace, image.Point{X: 100, Y: newHeight}, 0, 0, gocv.InterpolationLinear)
+		// Calculate the proportional height based on the desired height
+		// newHeight := (facialArea.H * 100) / facialArea.W
+		height := 150
+		newWidth := (facialArea.W * height) / facialArea.H
+		// gocv.Resize(croppedImg, &resizedFace, image.Point{X: 100, Y: newHeight}, 0, 0, gocv.InterpolationLinear)
+		gocv.Resize(croppedImg, &resizedFace, image.Point{X: newWidth, Y: height}, 0, 0, gocv.InterpolationLinear)
 		// Append the resized face image to the list
 		faceImages = append(faceImages, resizedFace.Clone()) // Clone to keep the resized Mat alive
 	}
@@ -162,12 +158,8 @@ func getFacesImagesByPersonID(db *sql.DB, personID int) ([]gocv.Mat, error) {
 	return faceImages, nil
 }
 
-const (
-	gridWidth = 500 // Width of the entire grid image
-	cellSize  = 100 // Size of each cell in the grid
-)
-
 // Function to create and display images in a grid
+
 func displayImagesInGrid(faceImages []gocv.Mat) error {
 	if len(faceImages) == 0 {
 		fmt.Println("No images to display")
@@ -190,13 +182,33 @@ func displayImagesInGrid(faceImages []gocv.Mat) error {
 		col := i % cols
 		row := i / cols
 
-		// Resize image to fit the cell size
+		// Calculate aspect ratio to maintain proportions
+		originalSize := img.Size()
+		aspectRatio := float64(originalSize[1]) / float64(originalSize[0])
+
+		// Determine the size of the image within the cell while maintaining aspect ratio
+		var resizedWidth, resizedHeight int
+		if aspectRatio > 1 {
+			// Image is wider than tall
+			resizedWidth = cellSize
+			resizedHeight = int(float64(cellSize) / aspectRatio)
+		} else {
+			// Image is taller than wide or square
+			resizedHeight = cellSize
+			resizedWidth = int(float64(cellSize) * aspectRatio)
+		}
+
+		// Resize the image
 		resizedImg := gocv.NewMat()
-		gocv.Resize(img, &resizedImg, image.Point{X: cellSize, Y: cellSize}, 0, 0, gocv.InterpolationLinear)
+		gocv.Resize(img, &resizedImg, image.Point{X: resizedWidth, Y: resizedHeight}, 0, 0, gocv.InterpolationLinear)
 		defer resizedImg.Close()
 
+		// Calculate the top-left corner to center the image within the cell
+		xOffset := (cellSize - resizedWidth) / 2
+		yOffset := (cellSize - resizedHeight) / 2
+
 		// Calculate the region in the grid image where the resized image will be placed
-		rect := image.Rect(col*cellSize, row*cellSize, (col+1)*cellSize, (row+1)*cellSize)
+		rect := image.Rect(col*cellSize+xOffset, row*cellSize+yOffset, col*cellSize+xOffset+resizedWidth, row*cellSize+yOffset+resizedHeight)
 		roi := gridImg.Region(rect)
 		defer roi.Close()
 

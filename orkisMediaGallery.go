@@ -78,15 +78,13 @@ func init() {
 }
 func main() {
 	// testFaceDetection2()
-
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	testViewFaces()
 	return
 
 	deleteAll()
 	fmt.Println("Files deleted successfully")
 	// return
-
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	// facesMain()
 	// return

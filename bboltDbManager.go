@@ -64,7 +64,8 @@ type VideoData struct {
 }
 
 type MediaItem struct {
-	FileName           string     `json:"fileName"` // unique mediaID
+	MediaID            int64      `json:"mediaID"`  //unique
+	FileName           string     `json:"fileName"` // unique name
 	MediaType          string     `json:"mediaType"`
 	LocalFilePath      string     `json:"filePath"`
 	LocalThumbnailPath string     `json:"thumbnailPath"`
