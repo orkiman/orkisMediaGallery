@@ -1,48 +1,237 @@
 package main
 
 import (
+	"crypto/md5"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
+	"io"
 	"log"
 	"math"
+	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3" // Import SQLite driver
 	"gocv.io/x/gocv"
 )
 
-func insertMediaToFacesUnprocessedMediaItemsTable(mediaItem *MediaItem, facesDbSqlite *sql.DB) error {
-	mediaPath := filepath.Join(rootDir, mediaItem.LocalFilePath)
-	mediaType := mediaItem.MediaType
+type ImageData struct {
+	Width  int `json:"width"`
+	Height int `json:"height"`
+}
 
-	stmt, err := facesDbSqlite.Prepare("INSERT INTO facesUnprocessedMediaItems (mediaItemPath, type) VALUES (?, ?)")
+type VideoData struct {
+	Width     int     `json:"width"`
+	Height    int     `json:"height"`
+	Duration  float64 `json:"duration"`
+	FrameRate float64 `json:"frameRate"`
+}
+
+type MediaItem struct {
+	MediaID            int64     `json:"mediaID"`  //unique
+	FileName           string    `json:"fileName"` // unique name
+	MediaType          string    `json:"mediaType"`
+	LocalFilePath      string    `json:"filePath"`
+	AbsoluteFilePath   string    `json:"absoluteFilePath"`
+	LocalThumbnailPath string    `json:"thumbnailPath"`
+	CreationDate       time.Time `json:"creationDate"`
+	FileSize           int64     `json:"fileSize"`
+	Checksum           string    `json:"checksum"`
+	// ImageData          *ImageData `json:"imageData,omitempty"`
+	// VideoData          *VideoData `json:"videoData,omitempty"`
+}
+
+func insertNewMediaToSqlDbAndGetNewMediaItem(db *sql.DB, absoluteMediaPath string) (MediaItem, error) {
+	// todo : generate unique mediaID
+	uniqueFileName, err := generateUniqueFileName(db, filepath.Base(absoluteMediaPath))
 	if err != nil {
+		return MediaItem{}, err
+	}
+	var mediaType string
+	if isImage(absoluteMediaPath) {
+		mediaType = "image"
+	} else if isVideoFile(absoluteMediaPath) {
+		mediaType = "video"
+	} else {
+		mediaType = "unknown"
+	}
+	if mediaType == "unknown" {
+		return MediaItem{}, errors.New("unknown file type")
+	}
+	var creationDate time.Time
+	if mediaType == "video" {
+		// get creation date from video metadata
+		creationDate, _ = getvideoCreationTime(absoluteMediaPath)
+	} else {
+		tagNames := []string{"DateTimeOriginal"}
+		exifNameValueMap, _ := getExifNameValueMap(absoluteMediaPath, tagNames)
+		creationDateStr := exifNameValueMap["DateTimeOriginal"]
+		creationDate, _ = time.Parse("2006:01:02 15:04:05", creationDateStr)
+	}
+	// if err != nil {
+	// 	return err
+	// }
+
+	fileInfo, err := os.Stat(absoluteMediaPath)
+	if err != nil {
+		return MediaItem{}, err
+	}
+	fileSize := fileInfo.Size()
+
+	checksum, err := calculateChecksum(absoluteMediaPath)
+	if err != nil {
+		return MediaItem{}, err
+	}
+
+	mediaItem := MediaItem{
+		FileName:           uniqueFileName,
+		MediaType:          mediaType,
+		LocalFilePath:      filepath.Join(filepath.Base(mediaDir), uniqueFileName),
+		LocalThumbnailPath: filepath.Join(filepath.Base(thumbnailDir), strings.TrimSuffix(uniqueFileName, filepath.Ext(uniqueFileName))+"_thumb.jpg"),
+		AbsoluteFilePath:   absoluteMediaPath,
+		CreationDate:       creationDate,
+		FileSize:           fileSize,
+		Checksum:           checksum,
+		// ImageData:          nil,
+		// VideoData:          nil,
+	}
+	// handleMediaItem(mediaItem)
+
+	// insert media item to mediaItems table
+	// insertStatement := "INSERT INTO mediaItems VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+	insertStatement := "INSERT INTO mediaItems (fileName, mediaType, localFilePath, absoluteFilePath, localThumbnailPath, creationDate, fileSize, checksum) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING mediaID"
+	// todo : json values?
+	err = db.QueryRow(insertStatement,
+		mediaItem.FileName,
+		mediaItem.MediaType,
+		mediaItem.LocalFilePath,
+		mediaItem.AbsoluteFilePath,
+		mediaItem.LocalThumbnailPath,
+		mediaItem.CreationDate,
+		mediaItem.FileSize,
+		mediaItem.Checksum,
+	).Scan(&mediaItem.MediaID)
+
+	if err != nil {
+		log.Panic(err)
+	}
+	return mediaItem, err
+
+}
+
+func isFileAllreadyExistsInSqlDb(db *sql.DB, newFilePath string) (alreadyExists bool, existName string) {
+	newChecksum, err := calculateChecksum(newFilePath)
+	if err != nil {
+		return false, ""
+	}
+	result := db.QueryRow("SELECT fileName FROM mediaItems WHERE checksum=?", newChecksum)
+
+	err = result.Scan(&existName)
+	if err == nil {
+		return true, existName
+	}
+	if err == sql.ErrNoRows {
+		return false, ""
+	}
+	log.Panic(err)
+	return true, ""
+
+}
+
+func generateUniqueFileName(db *sql.DB, originalFileName string) (string, error) {
+	// if file extention is .heic - change it to .jpg
+	if strings.HasSuffix(originalFileName, ".heic") {
+		originalFileName = strings.TrimSuffix(originalFileName, ".heic") + ".jpg"
+	}
+
+	var uniqueFileName = originalFileName
+	var counter = 0
+
+	for {
+		exists, err := fileNameExists(db, uniqueFileName)
+		if err != nil {
+			return "", err
+		}
+		if !exists {
+			return uniqueFileName, nil
+		}
+		counter++
+		ext := filepath.Ext(originalFileName)
+		baseName := strings.TrimSuffix(originalFileName, ext)
+		uniqueFileName = fmt.Sprintf("%s(%d)%s", baseName, counter, ext)
+	}
+}
+func fileNameExists(db *sql.DB, fileName string) (bool, error) {
+	result := db.QueryRow("SELECT * FROM mediaItems WHERE fileName = ?", fileName)
+	var id int
+	err := result.Scan(&id)
+	if err == nil {
+		return true, nil
+	}
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return true, err
+}
+
+func insertMediaToFacesUnprocessedMediaItemsTable(db *sql.DB, mediaItem *MediaItem) error {
+	// mediaPath := filepath.Join(rootDir, mediaItem.LocalFilePath)
+	// mediaType := mediaItem.MediaType
+	mediaID := mediaItem.MediaID
+	stmt, err := db.Prepare("INSERT INTO facesUnprocessedMediaItems (mediaID) VALUES (?)")
+	if err != nil {
+		// log.Panic(err)
 		return fmt.Errorf("prepare statement: %v", err)
 	}
 	defer stmt.Close()
 
 	// Execute the SQL statement
-	_, err = stmt.Exec(mediaPath, mediaType)
+	_, err = stmt.Exec(mediaID)
 	if err != nil {
+		log.Panic(err)
 		return fmt.Errorf("execute statement: %v", err)
 	}
 
 	return nil
 }
 
-func createFacesUnprocessedMediaItemsTable(facesDbSqlite *sql.DB) error {
+func createMediaItemsTable(db *sql.DB) error {
+	// Define the SQL statement to create the table
+	createTableSQL := `CREATE TABLE IF NOT EXISTS mediaItems (
+		mediaID 			INTEGER PRIMARY KEY AUTOINCREMENT,	-- Primary key, unique identifier for each media item
+		fileName 			TEXT NOT NULL,                    	-- Name of the media file
+		mediaType 			TEXT NOT NULL,                   	-- Type of media (image or video)
+		localFilePath 		TEXT NOT NULL,               		-- Path from rootDirto the media file on the local device
+		absoluteFilePath	TEXT NOT NULL,               		-- absolute Path to the media file on the local device
+		localThumbnailPath 	TEXT,                   			-- Path to the thumbnail image for the media
+		creationDate 		DATETIME,                     		-- Date and time when the media was created
+		fileSize 			INTEGER,                          	-- Size of the media file in bytes
+		checksum 			TEXT                              	-- Checksum of the media file for integrity verification
+	);`
+
+	// Execute the SQL statement
+	_, err := db.Exec(createTableSQL)
+	if err != nil {
+		return fmt.Errorf("failed to create table: %v", err)
+	}
+
+	return nil
+}
+
+func createFacesUnprocessedMediaItemsTable(db *sql.DB) error {
 	// Define the SQL statement to create the table
 	createTableSQL := `
     CREATE TABLE IF NOT EXISTS facesUnprocessedMediaItems (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        mediaItemPath TEXT,
-        type TEXT
+        mediaID INTEGER PRIMARY KEY
     );`
 
 	// Execute the SQL statement
-	_, err := facesDbSqlite.Exec(createTableSQL)
+	_, err := db.Exec(createTableSQL)
 	if err != nil {
 		return fmt.Errorf("failed to create table: %v", err)
 	}
@@ -239,12 +428,11 @@ func displayImagesInGrid(faceImages []gocv.Mat) error {
 
 // Example usage
 
-func testViewFaces() {
-	facesDbSqlite, err := sql.Open("sqlite3", "./faces.db")
-	defer facesDbSqlite.Close()
+func testViewFaces(db *sql.DB) {
+	defer db.Close()
 	// personID := 3
 	// faceImages, err := getFacesImagesByPersonID(facesDbSqlite, personID)
-	faceImages, err := getAllFacesImages(facesDbSqlite)
+	faceImages, err := getAllFacesImages(db)
 
 	if err != nil {
 		fmt.Println("Error:", err)
@@ -263,4 +451,138 @@ func testViewFaces() {
 	// 	fmt.Printf("Displayed face image %d\n", i+1)
 	// 	faceImage.Close() // Close each Mat after usage
 	// }
+}
+
+func deleteMedia(db *sql.DB, mediaID int) error {
+
+	// remove related persons from persons table. need to reclustering after
+
+	stmnt := "delete frome persons where personID in (select personID from face_embeddings where mediaID=?)"
+
+	if _, err := db.Exec(stmnt, mediaID); err != nil {
+		return err
+	}
+	// remove related embeddings from face_embeddings table
+	db.Exec("DELETE FROM face_embeddings WHERE mediaID=?", mediaID)
+
+	// finally remove media from MediaItems table
+	db.Exec("DELETE FROM MediaItems WHERE mediaID=?", mediaID)
+
+	// todo here : reclustering
+	return nil
+
+}
+
+func calculateChecksum(filePath string) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	hash := md5.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+
+	checksum := hex.EncodeToString(hash.Sum(nil))
+	return checksum, nil
+}
+func printDatabaseLength(db *sql.DB) {
+	result := db.QueryRow("SELECT COUNT(*) FROM MediaItems")
+
+	var count int
+	err := result.Scan(&count)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("Database length: ", count)
+}
+
+func getMediaItemsFilteredAndSorted(db *sql.DB, page, pageSize int, sortBy, filterFileName, sortOrder string) (mediaItems []MediaItem, totalFiles int, err error) {
+	var orderBy string
+	switch sortBy {
+	case "name":
+		orderBy = "ORDER BY fileName"
+	case "date":
+		orderBy = "ORDER BY creationDate"
+	case "size":
+		orderBy = "ORDER BY fileSize"
+	default:
+		orderBy = ""
+	}
+
+	if sortOrder == "desc" {
+		orderBy += " DESC"
+	} else {
+		orderBy += " ASC"
+	}
+
+	// Building the query
+	query := `
+        SELECT mediaID, fileName, mediaType, localFilePath, absoluteFilePath, localThumbnailPath, creationDate, fileSize, checksum
+        FROM mediaItems
+        WHERE fileName LIKE ?
+        ` + orderBy + `
+        LIMIT ? OFFSET ?`
+
+	// Calculate the offset for pagination
+	offset := (page - 1) * pageSize
+
+	// Execute the query
+	rows, err := db.Query(query, "%"+filterFileName+"%", pageSize, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	// Scan the results into the mediaItems slice
+	for rows.Next() {
+		var mediaItem MediaItem
+		err := rows.Scan(
+			&mediaItem.MediaID,
+			&mediaItem.FileName,
+			&mediaItem.MediaType,
+			&mediaItem.LocalFilePath,
+			&mediaItem.AbsoluteFilePath,
+			&mediaItem.LocalThumbnailPath,
+			&mediaItem.CreationDate,
+			&mediaItem.FileSize,
+			&mediaItem.Checksum,
+		)
+		if err != nil {
+			return nil, 0, err
+		}
+		mediaItems = append(mediaItems, mediaItem)
+	}
+
+	// Check for any errors encountered during iteration
+	if err = rows.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	totalFiles = len(mediaItems)
+
+	return mediaItems, totalFiles, nil
+}
+
+func getMediaItemFromSql(db *sql.DB, mediaID int) (MediaItem, error) {
+	result := db.QueryRow("SELECT * FROM MediaItems WHERE mediaID=?", mediaID)
+
+	var mediaItem MediaItem
+	err := result.Scan(
+		&mediaItem.MediaID,
+		&mediaItem.FileName,
+		&mediaItem.MediaType,
+		&mediaItem.LocalFilePath,
+		&mediaItem.AbsoluteFilePath,
+		&mediaItem.LocalThumbnailPath,
+		&mediaItem.CreationDate,
+		&mediaItem.FileSize,
+		&mediaItem.Checksum,
+	)
+	if err != nil {
+		return MediaItem{}, err
+	}
+	return mediaItem, nil
 }

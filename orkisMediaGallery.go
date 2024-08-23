@@ -76,20 +76,34 @@ func init() {
 		panic("Could not decode credentials file")
 	}
 }
-func main() {
-	// testFaceDetection2()
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	testViewFaces()
-	return
 
+var db *sql.DB
+
+func main() {
 	deleteAll()
 	fmt.Println("Files deleted successfully")
+	// return
+
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	var err error
+	db, err = sql.Open("sqlite3", "./orkisMediaGallery.db")
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+	defer db.Close()
+	err = createMediaItemsTable(db)
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+
+	// testViewFaces()
 	// return
 
 	// facesMain()
 	// return
 
-	var err error
 	globalIpv6Address, err = getDefaultIPv6Address()
 	fmt.Println(globalIpv6Address)
 	if err != nil {
@@ -105,12 +119,12 @@ func main() {
 	os.MkdirAll(duplicatesDir, 0755)
 	os.MkdirAll(binDir, 0755)
 
-	mediaDb, err := openBboltDb()
-	if err != nil {
-		fmt.Println("Error:", err)
-		return
-	}
-	defer mediaDb.Close()
+	// mediaDb, err := openBboltDb()
+	// if err != nil {
+	// 	fmt.Println("Error:", err)
+	// 	return
+	// }
+	// defer mediaDb.Close()
 
 	// err = deleteMedia([]string{"20231211_120532.jpg"})
 	// if err != nil {
@@ -136,7 +150,7 @@ func main() {
 		// getClustersAndUpdatefacesDataInMediaDb()
 	}
 
-	printDatabaseLength()
+	printDatabaseLength(db)
 	// testCv()
 	http.HandleFunc("/", basicAuth(handleRootDirectoryRequests))
 
@@ -176,6 +190,8 @@ func deleteAll() {
 	os.RemoveAll(binDir)
 	os.RemoveAll("media.db")
 	os.RemoveAll("faces.db")
+	os.RemoveAll("orkisMediaGallery.db")
+
 	// clearDb()
 }
 
@@ -200,12 +216,12 @@ func handleRootDirectoryRequests(w http.ResponseWriter, r *http.Request) {
 		}
 		sortOrder := r.URL.Query().Get("sortOrder")
 		if sortOrder == "" {
-			sortOrder = "asc"
+			sortOrder = "ASC"
 		}
 		filterBy := r.URL.Query().Get("filterBy")
 
 		// Query the database for files
-		mediaItems, totalFiles, err := getMediaItems(page, pageSize, sortBy, filterBy, sortOrder)
+		mediaItems, totalFiles, err := getMediaItemsFilteredAndSorted(db, page, pageSize, sortBy, filterBy, sortOrder)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -325,11 +341,12 @@ func handleProcessSelected(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.SelectedAction == "delete" {
-		err = deleteMedia(req.SelectedFiles)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+		log.Print("todo: fix delete selected files \n")
+		// err = deleteMedia(req.SelectedFiles)
+		// if err != nil {
+		// 	http.Error(w, err.Error(), http.StatusInternalServerError)
+		// 	return
+		// }
 	} else {
 		http.Error(w, "action not yet implemented", http.StatusBadRequest)
 		return
@@ -443,13 +460,7 @@ func orginizeNewFiles() (processedFilesCounter int, err error) {
 	// embeddingsDb = openEmbeddingsDb()
 	// defer embeddingsDb.Close()
 
-	// Open the SQLite database
-	facesDbSqlite, err := sql.Open("sqlite3", "./faces.db")
-	defer facesDbSqlite.Close()
-	if err != nil {
-		panic(fmt.Sprintf("failed to open database: %v", err))
-	}
-	err = createFacesUnprocessedMediaItemsTable(facesDbSqlite)
+	err = createFacesUnprocessedMediaItemsTable(db)
 	if err != nil {
 		panic(fmt.Sprintf("failed to create facesUnprocessedMediaItems table: %v", err))
 	}
@@ -460,7 +471,7 @@ func orginizeNewFiles() (processedFilesCounter int, err error) {
 		}
 
 		if !entry.IsDir() {
-			if err := processFile(path, facesDbSqlite); err != nil {
+			if err := processFile(path); err != nil {
 				return err
 			}
 			processedFilesCounter++
@@ -477,8 +488,8 @@ func orginizeNewFiles() (processedFilesCounter int, err error) {
 	return processedFilesCounter, nil
 }
 
-func processFile(originalFilePath string, facesDbSqlite *sql.DB) error {
-	fileExists, exsistingName := isFileallreadyExistsInDb(originalFilePath)
+func processFile(originalFilePath string) error {
+	fileExists, exsistingName := isFileAllreadyExistsInSqlDb(db, originalFilePath)
 	if fileExists {
 		err := os.Rename(originalFilePath, filepath.Join(duplicatesDir,
 			filepath.Base(originalFilePath)+"_alreadyExsistsInDataBaseWithTheName_"+exsistingName))
@@ -487,7 +498,7 @@ func processFile(originalFilePath string, facesDbSqlite *sql.DB) error {
 		}
 		return nil
 	}
-	uniqueName, err := generateUniqueFileName(mediaDB, filepath.Base(originalFilePath))
+	uniqueName, err := generateUniqueFileName(db, filepath.Base(originalFilePath))
 	if err != nil {
 		return fmt.Errorf("error generating unique file name: %w", err)
 	}
@@ -524,10 +535,16 @@ func processFile(originalFilePath string, facesDbSqlite *sql.DB) error {
 		return fmt.Errorf("unsupported file type: %s", originalFilePath)
 	}
 
-	mediaItem, err := insertMediaToDb(filepath.Join(mediaDir, uniqueName))
+	mediaItem, err := insertNewMediaToSqlDbAndGetNewMediaItem(db, filepath.Join(mediaDir, uniqueName))
+	if err != nil {
+		log.Panic(err)
+		return err
+	}
 	// _, err = insertMediaToDb(filepath.Join(mediaDir, uniqueName))
-	err = insertMediaToFacesUnprocessedMediaItemsTable(&mediaItem, facesDbSqlite)
-
+	err = insertMediaToFacesUnprocessedMediaItemsTable(db, &mediaItem)
+	if err != nil {
+		log.Panic(err)
+	}
 	return err
 }
 
