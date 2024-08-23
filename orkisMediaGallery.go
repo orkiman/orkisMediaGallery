@@ -80,8 +80,8 @@ func init() {
 var db *sql.DB
 
 func main() {
-	deleteAll()
-	fmt.Println("Files deleted successfully")
+	// deleteAll()
+	// fmt.Println("Files deleted successfully")
 	// return
 
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
@@ -98,8 +98,8 @@ func main() {
 		return
 	}
 
-	// testViewFaces()
-	// return
+	testViewFaces(db)
+	return
 
 	// facesMain()
 	// return

@@ -220,7 +220,17 @@ def handleUnprocessedMediaItems(conn, cursor):
     # 3.cluster them into Persons Table
     try:
         # 1. Get the unprocessed MediaItems
-        quary = "SELECT mediaID, absoluteMediaPath, mediaType From mediaItems, facesUnprocessedMediaItems WHERE mediaItems.mediaID = facesUnprocessedMediaItems.mediaID"
+        # quary = "SELECT mediaID, absoluteMediaPath, mediaType From mediaItems, facesUnprocessedMediaItems WHERE mediaItems.mediaID = facesUnprocessedMediaItems.mediaID"
+        quary = '''
+            SELECT 
+            mediaItems.mediaID, 
+            absoluteFilePath, 
+            mediaType 
+            FROM 
+            mediaItems 
+            INNER JOIN facesUnprocessedMediaItems 
+            ON mediaItems.mediaID = facesUnprocessedMediaItems.mediaID
+        '''
         cursor.execute(quary)
         facesUnprocessedMediaItems = cursor.fetchall()
         # 2. Iterate each media item and save its embeddings
@@ -228,11 +238,11 @@ def handleUnprocessedMediaItems(conn, cursor):
             mediaID, media_path, media_type = media_item_info 
             print(f"Processing: {media_path} (Type: {media_type})")
             if media_type == "image":
-                extractAndSaveEmbeddingsFromImage(conn, cursor, media_path, mediaID, media_type)
+                extractAndSaveEmbeddingsFromImage(conn, cursor, media_path, mediaID)
             elif media_type == "video":
                 extracted_frames = extract_frames_from_video(media_path)
                 for frame, frameNumber in extracted_frames:
-                    extractAndSaveEmbeddingsFromImage(conn, cursor, frame, mediaID, media_type, frameNumber)
+                    extractAndSaveEmbeddingsFromImage(conn, cursor, frame, mediaID, frameNumber)
         print(f"prcessed {len(facesUnprocessedMediaItems)} items")
 
         # Clear unprocessed media items

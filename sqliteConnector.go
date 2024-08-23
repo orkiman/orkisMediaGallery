@@ -278,8 +278,15 @@ func getAllFacesImages(db *sql.DB) ([]gocv.Mat, error) {
 func getFacesImagesByPersonID(db *sql.DB, personID int) ([]gocv.Mat, error) {
 	// Query the database for image paths and facial areas
 
-	query := "SELECT mediaPath, facial_area, type FROM face_embeddings WHERE personID=?"
+	// query := "SELECT mediaPath, facial_area, type FROM face_embeddings WHERE personID=?"
 	// err := db.QueryRow(query, personID).Scan(&mediaPath, &facialAreaJSON)
+	query := `
+			SELECT absoluteFilePath, facial_area, mediaType 
+			FROM face_embeddings 
+			JOIN mediaItems 
+			ON face_embeddings.mediaID = mediaItems.mediaID 
+			WHERE personID = ?
+			`
 	rows, err := db.Query(query, personID)
 
 	if err != nil {
