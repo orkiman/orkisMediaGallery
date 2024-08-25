@@ -1,0 +1,51 @@
+<!-- facesTemplate.html -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Faces</title>
+    <style>
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 10px;
+        }
+
+        .grid-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .grid-item img {
+            width: auto;
+            height: 150px;
+        }
+
+        .grid-item .data {
+            margin-top: 10px;
+            text-align: center;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <a href="/">Home</a>
+    </div>
+    <div class="grid">
+        {{range .}}
+  <div class="grid-item">
+    <img src="data:image/jpeg;base64,{{ .ImageData }}" alt="face image" onclick="window.location.href='/?personID={{ .PersonID }}'">
+    <div class="data">
+      <p>PersonID: {{ .PersonID }}</p>
+      <p>Quantity: {{ .MediaCount }}</p>
+    </div>
+  </div>
+{{end}}
+    </div>
+</body>
+
+</html>

@@ -211,7 +211,10 @@
             <input type="text" name="filterBy" id="filterBy" value="{{.FilterBy}}">
 
             <button type="submit">Apply sorting / filtering</button>
+
         </form>
+        <button onclick="location.href='facesTemplate'">Faces Template</button>
+
     </div>
 
     <form id="selected-form" action="/process-selected" method="POST">
@@ -223,13 +226,11 @@
                         <img class="thumbnail {{if eq .MediaType "video"}}video-frame{{else if eq .MediaType "image"}}image-frame{{end}}" src="{{.LocalThumbnailPath}}" alt="{{.FileName}}">
                     </a>
                     <label class="checkbox-wrapper">
-                        <input type="checkbox" name="selected_files" value="{{.FileName}}">
+                        <input type="checkbox" name="selected_files" value="{{.MediaID}}">
                         <span class="checkmark"></span> 
                         <!-- <p class="file-name">{{.FileName}}</p> -->
                     </label>
                 </div>
-                    
-                
             </div>
             {{end}}
         </div>
@@ -237,7 +238,7 @@
         <!-- add littls space from the bottom -->
         <div style="height: 50px;"></div>
 
-        <div class=process-selected-button-container>
+        <div class="process-selected-button-container">
             <select class="action-select">
                 <option value="selectAction">select action</option>
                 <option value="delete">Delete</option>
@@ -245,8 +246,7 @@
                 <option value="addToAlbum">Add to Album</option>
                 <option value="addTags">Add Tags</option>
             </select>
-            <button type="submit" class="submit-selected" id="process-seleced-button" disabled>Process Selected
-                Files</button>
+            <button type="submit" class="submit-selected" id="process-seleced-button" disabled>Process Selected Files</button>
         </div>
     </form>
 

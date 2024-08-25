@@ -145,14 +145,14 @@ def createFaceEmbeddingsTable(conn, cursor):
         embedding BLOB,
         mediaID INTEGER,
         facial_area TEXT,
-        videoFrameNumber TEXT,
+        videoFrameNumber INTEGER,
         personID INTEGER
     )
     ''')
                    
     conn.commit()
 
-def extractAndSaveEmbeddingsFromImage(conn, cursor, imageOrPath, media_ID, video_frame_number = None):
+def extractAndSaveEmbeddingsFromImage(conn, cursor, imageOrPath, media_ID, video_frame_number = 0):
     
     # Get embeddings from DeepFace
     model_name = "Dlib"

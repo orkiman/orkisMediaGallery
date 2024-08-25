@@ -86,6 +86,7 @@ func main() {
 
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	var err error
+
 	db, err = sql.Open("sqlite3", "./orkisMediaGallery.db")
 	if err != nil {
 		log.Fatal(err)
@@ -98,8 +99,8 @@ func main() {
 		return
 	}
 
-	testViewFaces(db)
-	return
+	// testViewFaces(db)
+	// return
 
 	// facesMain()
 	// return
@@ -161,6 +162,8 @@ func main() {
 	http.HandleFunc("/thumbnails/", basicAuth(handleThumbnails))
 
 	http.HandleFunc("/processSelected", basicAuth(handleProcessSelected))
+	http.HandleFunc("/facesTemplate", basicAuth(processFacesTemplate))
+
 	encripted := true
 	if encripted {
 		// for production:
@@ -220,8 +223,11 @@ func handleRootDirectoryRequests(w http.ResponseWriter, r *http.Request) {
 		}
 		filterBy := r.URL.Query().Get("filterBy")
 
+		personID := r.URL.Query().Get("personID")
+		log.Print("page:", page, "pageSize:", pageSize, "sortBy:", sortBy, "sortOrder:", sortOrder, "filterBy:", filterBy, "personID:", personID)
+
 		// Query the database for files
-		mediaItems, totalFiles, err := getMediaItemsFilteredAndSorted(db, page, pageSize, sortBy, filterBy, sortOrder)
+		mediaItems, totalFiles, err := getMediaItemsFilteredAndSorted(db, page, pageSize, sortBy, filterBy, sortOrder, personID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -328,6 +334,29 @@ func handleRootDirectoryRequests(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func processFacesTemplate(w http.ResponseWriter, r *http.Request) {
+
+	faces, err := getOneImagePerPerson(db)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if faces == nil {
+		http.Error(w, "No faces found", http.StatusNotFound)
+		return
+	}
+	t, err := template.ParseFiles("facesTemplate.html")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	err = t.Execute(w, faces)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
 func handleProcessSelected(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -341,12 +370,21 @@ func handleProcessSelected(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.SelectedAction == "delete" {
-		log.Print("todo: fix delete selected files \n")
-		// err = deleteMedia(req.SelectedFiles)
-		// if err != nil {
-		// 	http.Error(w, err.Error(), http.StatusInternalServerError)
-		// 	return
-		// }
+		log.Print("todo: fix delete selected files  - or reclustering logic yet not implemented\n")
+		return
+		for _, mediaIDsAsString := range req.SelectedFiles {
+			mediaID, err := strconv.Atoi(mediaIDsAsString)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			err = deleteMedia(db, mediaID)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+
 	} else {
 		http.Error(w, "action not yet implemented", http.StatusBadRequest)
 		return

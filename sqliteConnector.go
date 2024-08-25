@@ -1,18 +1,22 @@
 package main
 
 import (
+	"bytes"
 	"crypto/md5"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
+	"image/jpeg"
 	"io"
 	"log"
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -461,23 +465,57 @@ func testViewFaces(db *sql.DB) {
 }
 
 func deleteMedia(db *sql.DB, mediaID int) error {
-
-	// remove related persons from persons table. need to reclustering after
-
-	stmnt := "delete frome persons where personID in (select personID from face_embeddings where mediaID=?)"
-
-	if _, err := db.Exec(stmnt, mediaID); err != nil {
+	tx, err := db.Begin()
+	if err != nil {
 		return err
 	}
+
+	// remove related persons from persons table. need to reclustering after
+	// stmt := `
+	//         DELETE p
+	//         FROM persons p
+	//         JOIN face_embeddings fe ON p.personID = fe.personID
+	//         WHERE fe.mediaID = ?
+	//
+	//    `
+
+	// stmt := `
+	// DELETE FROM persons
+	// WHERE personID IN (
+	// 	SELECT p.personID
+	// 	FROM persons p
+	// 	JOIN face_embeddings fe ON p.personID = fe.personID
+	// 	WHERE fe.mediaID = ?
+	// )
+	// `
+
+	stmt := "DELETE FROM persons WHERE personID IN (SELECT personID FROM face_embeddings WHERE mediaID = ?)"
+
+	if _, err := tx.Exec(stmt, mediaID); err != nil {
+		tx.Rollback()
+		log.Panic(err)
+		return err
+	}
+
 	// remove related embeddings from face_embeddings table
-	db.Exec("DELETE FROM face_embeddings WHERE mediaID=?", mediaID)
+	if _, err := tx.Exec("DELETE FROM face_embeddings WHERE mediaID=?", mediaID); err != nil {
+		tx.Rollback()
+		log.Panic(err)
+		return err
+	}
 
 	// finally remove media from MediaItems table
-	db.Exec("DELETE FROM MediaItems WHERE mediaID=?", mediaID)
+	if _, err := tx.Exec("DELETE FROM MediaItems WHERE mediaID=?", mediaID); err != nil {
+		tx.Rollback()
+		return err
+	}
 
 	// todo here : reclustering
-	return nil
+	if err := tx.Commit(); err != nil {
+		return err
+	}
 
+	return nil
 }
 
 func calculateChecksum(filePath string) (string, error) {
@@ -506,7 +544,7 @@ func printDatabaseLength(db *sql.DB) {
 	fmt.Println("Database length: ", count)
 }
 
-func getMediaItemsFilteredAndSorted(db *sql.DB, page, pageSize int, sortBy, filterFileName, sortOrder string) (mediaItems []MediaItem, totalFiles int, err error) {
+func getMediaItemsFilteredAndSorted(db *sql.DB, page, pageSize int, sortBy, filterFileName, sortOrder, personID string) (mediaItems []MediaItem, totalFiles int, err error) {
 	var orderBy string
 	switch sortBy {
 	case "name":
@@ -525,23 +563,45 @@ func getMediaItemsFilteredAndSorted(db *sql.DB, page, pageSize int, sortBy, filt
 		orderBy += " ASC"
 	}
 
+	where := "WHERE fileName LIKE ?"
+	if personID != "" {
+		where = ` JOIN face_embeddings ON mediaItems.mediaID = face_embeddings.mediaID WHERE fileName LIKE ? AND personID = ?	`
+	}
+
 	// Building the query
 	query := `
-        SELECT mediaID, fileName, mediaType, localFilePath, absoluteFilePath, localThumbnailPath, creationDate, fileSize, checksum
-        FROM mediaItems
-        WHERE fileName LIKE ?
+        SELECT 
+			mediaItems.mediaID,
+			fileName, 
+			mediaType, 
+			localFilePath, 
+			absoluteFilePath, 
+			localThumbnailPath, 
+			creationDate, 
+			fileSize, 
+			checksum
+        FROM mediaItems 
+        ` + where + `
         ` + orderBy + `
         LIMIT ? OFFSET ?`
-
+	log.Print("query:", query)
 	// Calculate the offset for pagination
 	offset := (page - 1) * pageSize
 
 	// Execute the query
-	rows, err := db.Query(query, "%"+filterFileName+"%", pageSize, offset)
+	var rows *sql.Rows
+	if personID != "" {
+		rows, err = db.Query(query, "%"+filterFileName+"%", personID, pageSize, offset)
+	} else {
+		rows, err = db.Query(query, "%"+filterFileName+"%", pageSize, offset)
+	}
 	if err != nil {
+		log.Println("Error executing query:", err)
 		return nil, 0, err
 	}
-	defer rows.Close()
+	if rows != nil {
+		defer rows.Close()
+	}
 
 	// Scan the results into the mediaItems slice
 	for rows.Next() {
@@ -592,4 +652,152 @@ func getMediaItemFromSql(db *sql.DB, mediaID int) (MediaItem, error) {
 		return MediaItem{}, err
 	}
 	return mediaItem, nil
+}
+
+func getFaceImagesBase64FromImage(img gocv.Mat, facialAreaJSON string) (string, error) {
+
+	// Parse the facial area JSON
+	var facialArea FacialArea
+	if err := json.Unmarshal([]byte(facialAreaJSON), &facialArea); err != nil {
+		return "", fmt.Errorf("failed to parse facial areas: %v", err)
+	}
+
+	// Ensure the facial area is within bounds
+	if facialArea.X < 0 {
+		facialArea.X = 0
+	}
+	if facialArea.Y < 0 {
+		facialArea.Y = 0
+	}
+	if facialArea.X+facialArea.W > img.Cols() {
+		facialArea.W = img.Cols() - facialArea.X
+	}
+	if facialArea.Y+facialArea.H > img.Rows() {
+		facialArea.H = img.Rows() - facialArea.Y
+	}
+
+	// Crop the image based on the facial area
+	croppedImg := img.Region(image.Rect(facialArea.X, facialArea.Y, facialArea.X+facialArea.W, facialArea.Y+facialArea.H))
+	defer croppedImg.Close()
+
+	// Convert the cropped face to an image.Image for encoding
+	imgGo, err := croppedImg.ToImage()
+	if err != nil {
+		return "", fmt.Errorf("failed to convert Mat to image.Image: %v", err)
+	}
+
+	// Encode the image to JPEG and then to Base64
+	var buf bytes.Buffer
+	err = jpeg.Encode(&buf, imgGo, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode image: %v", err)
+	}
+	imgBase64Str := base64.StdEncoding.EncodeToString(buf.Bytes())
+
+	// Return the face
+	return imgBase64Str, nil
+}
+
+func getImageFromVideoPath(videoPath string, frameNUmber int) (gocv.Mat, error) {
+
+	// Open the video file
+	v, err := gocv.VideoCaptureFile(videoPath)
+	if err != nil {
+		return gocv.NewMat(), fmt.Errorf("failed to open video file: %v", err)
+	}
+	defer v.Close()
+
+	// Set the frame number
+	v.Set(gocv.VideoCapturePosFrames, float64(frameNUmber))
+
+	// Read the frame
+	frame := gocv.NewMat()
+	if ok := v.Read(&frame); !ok {
+		return gocv.NewMat(), fmt.Errorf("failed to read frame")
+	}
+	defer frame.Close()
+
+	return frame, nil
+}
+
+type Face struct {
+	ImageData  string
+	PersonID   string
+	MediaCount string
+}
+
+func getOneImagePerPerson(db *sql.DB) ([]Face, error) {
+
+	var faces []Face
+	var personID int
+	var absoluteFilePath string
+	var facialAreaJSON string
+	var mediaType string
+	var videoFrameNumber int
+	var mediaCount int
+
+	query := `
+		SELECT 
+			p.personID,
+			m.absoluteFilePath,
+			fe.facial_area,
+			m.mediaType,
+			fe.videoFrameNumber,
+			COUNT(fe.mediaID) AS mediaCount
+		FROM 
+			persons p
+		JOIN 
+			face_embeddings fe ON p.personID = fe.personID
+		JOIN 
+			mediaItems m ON fe.mediaID = m.mediaID
+		GROUP BY 
+			fe.personID
+		ORDER BY 
+			mediaCount DESC;
+	`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query database: %v", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		if err := rows.Scan(&personID, &absoluteFilePath, &facialAreaJSON, &mediaType, &videoFrameNumber, &mediaCount); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %v", err)
+		}
+
+		var img gocv.Mat
+		if mediaType == "image" {
+			img = gocv.IMRead(absoluteFilePath, gocv.IMReadColor)
+			if img.Empty() {
+				return nil, fmt.Errorf("failed to read image from path %s", absoluteFilePath)
+			}
+		} else if mediaType == "video" {
+			img, err = getImageFromVideoPath(absoluteFilePath, videoFrameNumber)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get image from video at path %s, frame %d: %v", absoluteFilePath, videoFrameNumber, err)
+			}
+		}
+
+		// Make sure to close the Mat after processing
+		defer img.Close()
+
+		face, err := getFaceImagesBase64FromImage(img, facialAreaJSON)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get face image data for personID %d: %v", personID, err)
+		}
+
+		faces = append(faces, Face{
+			ImageData:  face,
+			PersonID:   strconv.Itoa(personID),
+			MediaCount: strconv.Itoa(mediaCount),
+		})
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error encountered while iterating rows: %v", err)
+	}
+
+	return faces, nil
 }
