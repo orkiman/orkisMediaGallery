@@ -282,13 +282,13 @@ func getAllFacesImages(db *sql.DB) ([]gocv.Mat, error) {
 func getFacesImagesByPersonID(db *sql.DB, personID int) ([]gocv.Mat, error) {
 	// Query the database for image paths and facial areas
 
-	// query := "SELECT mediaPath, facial_area, type FROM face_embeddings WHERE personID=?"
+	// query := "SELECT mediaPath, facial_area, type FROM faceEmbeddings WHERE personID=?"
 	// err := db.QueryRow(query, personID).Scan(&mediaPath, &facialAreaJSON)
 	query := `
 			SELECT absoluteFilePath, facial_area, mediaType 
-			FROM face_embeddings 
+			FROM faceEmbeddings 
 			JOIN mediaItems 
-			ON face_embeddings.mediaID = mediaItems.mediaID 
+			ON faceEmbeddings.mediaID = mediaItems.mediaID 
 			WHERE personID = ?
 			`
 	rows, err := db.Query(query, personID)
@@ -474,7 +474,7 @@ func deleteMedia(db *sql.DB, mediaID int) error {
 	// stmt := `
 	//         DELETE p
 	//         FROM persons p
-	//         JOIN face_embeddings fe ON p.personID = fe.personID
+	//         JOIN faceEmbeddings fe ON p.personID = fe.personID
 	//         WHERE fe.mediaID = ?
 	//
 	//    `
@@ -484,12 +484,12 @@ func deleteMedia(db *sql.DB, mediaID int) error {
 	// WHERE personID IN (
 	// 	SELECT p.personID
 	// 	FROM persons p
-	// 	JOIN face_embeddings fe ON p.personID = fe.personID
+	// 	JOIN faceEmbeddings fe ON p.personID = fe.personID
 	// 	WHERE fe.mediaID = ?
 	// )
 	// `
 
-	stmt := "DELETE FROM persons WHERE personID IN (SELECT personID FROM face_embeddings WHERE mediaID = ?)"
+	stmt := "DELETE FROM persons WHERE personID IN (SELECT personID FROM faceEmbeddings WHERE mediaID = ?)"
 
 	if _, err := tx.Exec(stmt, mediaID); err != nil {
 		tx.Rollback()
@@ -497,8 +497,8 @@ func deleteMedia(db *sql.DB, mediaID int) error {
 		return err
 	}
 
-	// remove related embeddings from face_embeddings table
-	if _, err := tx.Exec("DELETE FROM face_embeddings WHERE mediaID=?", mediaID); err != nil {
+	// remove related embeddings from faceEmbeddings table
+	if _, err := tx.Exec("DELETE FROM faceEmbeddings WHERE mediaID=?", mediaID); err != nil {
 		tx.Rollback()
 		log.Panic(err)
 		return err
@@ -565,12 +565,12 @@ func getMediaItemsFilteredAndSorted(db *sql.DB, page, pageSize int, sortBy, filt
 
 	where := "WHERE fileName LIKE ?"
 	if personID != "" {
-		where = ` JOIN face_embeddings ON mediaItems.mediaID = face_embeddings.mediaID WHERE fileName LIKE ? AND personID = ?	`
+		where = ` JOIN faceEmbeddings ON mediaItems.mediaID = faceEmbeddings.mediaID WHERE fileName LIKE ? AND personID = ?	`
 	}
 
 	// Building the query
 	query := `
-        SELECT 
+        SELECT DISTINCT
 			mediaItems.mediaID,
 			fileName, 
 			mediaType, 
@@ -584,7 +584,7 @@ func getMediaItemsFilteredAndSorted(db *sql.DB, page, pageSize int, sortBy, filt
         ` + where + `
         ` + orderBy + `
         LIMIT ? OFFSET ?`
-	log.Print("query:", query)
+	// log.Print("query:", query)
 	// Calculate the offset for pagination
 	offset := (page - 1) * pageSize
 
@@ -747,7 +747,7 @@ func getOneImagePerPerson(db *sql.DB) ([]Face, error) {
 		FROM 
 			persons p
 		JOIN 
-			face_embeddings fe ON p.personID = fe.personID
+			faceEmbeddings fe ON p.personID = fe.personID
 		JOIN 
 			mediaItems m ON fe.mediaID = m.mediaID
 		GROUP BY 

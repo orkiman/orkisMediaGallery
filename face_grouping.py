@@ -60,14 +60,14 @@ def extract_frames_from_video(video_path, interval=20):
 
 
 def clusterEmbeddings(conn , cursor):
-    cursor.execute("SELECT * FROM face_embeddings WHERE PERSONID IS NULL")
-    face_embeddings_rows = cursor.fetchall()
+    cursor.execute("SELECT * FROM faceEmbeddings WHERE PERSONID IS NULL")
+    faceEmbeddings_rows = cursor.fetchall()
     model_name = "Dlib"
-    # iterating unpamed face embeddings from face_embeddings table
-    for face_embeddings_row in face_embeddings_rows:
-        embeddingID = face_embeddings_row["embeddingID"]
+    # iterating unpamed face embeddings from faceEmbeddings table
+    for faceEmbeddings_row in faceEmbeddings_rows:
+        embeddingID = faceEmbeddings_row["embeddingID"]
         # Deserialize the stored binary data back into a numpy array
-        serialized_face_embedding = face_embeddings_row["embedding"]
+        serialized_face_embedding = faceEmbeddings_row["embedding"]
         face_embedding = np.frombuffer(serialized_face_embedding, dtype=np.float64)
 
         cursor.execute("SELECT personID, avgEmbedding, embeddingCount from Persons")
@@ -98,26 +98,26 @@ def clusterEmbeddings(conn , cursor):
                 cursor.execute("UPDATE Persons SET avgEmbedding=?, embeddingCount=? WHERE personID=?", 
                                (serialized_new_average_embedding, newEmbeddingsCount, personID))
                 
-                # Update the personID in the face_embeddings table
-                cursor.execute("UPDATE face_embeddings SET personID=? WHERE embeddingID=?",
+                # Update the personID in the faceEmbeddings table
+                cursor.execute("UPDATE faceEmbeddings SET personID=? WHERE embeddingID=?",
                                (personID, embeddingID))
             else:
                 #Insert as a new person
                 cursor.execute("INSERT INTO Persons (avgEmbedding, embeddingCount, faceSampleEmbeddingID) VALUES (?, ?, ?)", 
                                (np.array(face_embedding, dtype=np.float64).tobytes(), 1, embeddingID))
                 
-                # Insert the new personID in the face_embeddings table
+                # Insert the new personID in the faceEmbeddings table
                 personID = cursor.lastrowid
-                cursor.execute("UPDATE face_embeddings SET personID=? WHERE embeddingID=?",
+                cursor.execute("UPDATE faceEmbeddings SET personID=? WHERE embeddingID=?",
                                (personID, embeddingID))
         else:
             #Insert as the first person
             cursor.execute("INSERT INTO Persons (avgEmbedding, embeddingCount, faceSampleEmbeddingID) VALUES (?, ?, ?)", 
                            (np.array(face_embedding, dtype=np.float64).tobytes(), 1, embeddingID))
             
-            # Insert the new personID in the face_embeddings table
+            # Insert the new personID in the faceEmbeddings table
             personID = cursor.lastrowid
-            cursor.execute("UPDATE face_embeddings SET personID=? WHERE embeddingID=?",
+            cursor.execute("UPDATE faceEmbeddings SET personID=? WHERE embeddingID=?",
                            (personID, embeddingID))
 
         # Commit the changes to the database
@@ -140,7 +140,7 @@ def create_persons_table(conn, cursor):
 
 def createFaceEmbeddingsTable(conn, cursor):
     cursor.execute('''
-    CREATE TABLE IF NOT EXISTS face_embeddings (
+    CREATE TABLE IF NOT EXISTS faceEmbeddings (
         embeddingID INTEGER PRIMARY KEY AUTOINCREMENT,
         embedding BLOB,
         mediaID INTEGER,
@@ -165,7 +165,7 @@ def extractAndSaveEmbeddingsFromImage(conn, cursor, imageOrPath, media_ID, video
         serialized_embedding = embedding_array.tobytes()
 
         facial_area = data['facial_area']
-        cursor.execute("INSERT INTO face_embeddings (embedding, mediaID, facial_area, videoFrameNumber) VALUES (?, ?, ?, ?)",
+        cursor.execute("INSERT INTO faceEmbeddings (embedding, mediaID, facial_area, videoFrameNumber) VALUES (?, ?, ?, ?)",
                        (serialized_embedding, media_ID, json.dumps(facial_area),  video_frame_number))
 
 

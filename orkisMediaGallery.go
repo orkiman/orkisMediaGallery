@@ -139,16 +139,9 @@ func main() {
 		return
 	}
 
-	if processedFilesCounter > 0 && false {
+	if processedFilesCounter > 0 {
 		// run clustering
-		cmd := exec.Command("python3", "clusterEmbeddings.py")
-		err := cmd.Run()
-		if err != nil {
-			log.Println("Failed to run clusterEmbeddings.py:", err)
-			return
-		}
-		// update media db with clustering results
-		// getClustersAndUpdatefacesDataInMediaDb()
+		doPythonClustering()
 	}
 
 	printDatabaseLength(db)
@@ -224,7 +217,7 @@ func handleRootDirectoryRequests(w http.ResponseWriter, r *http.Request) {
 		filterBy := r.URL.Query().Get("filterBy")
 
 		personID := r.URL.Query().Get("personID")
-		log.Print("page:", page, "pageSize:", pageSize, "sortBy:", sortBy, "sortOrder:", sortOrder, "filterBy:", filterBy, "personID:", personID)
+		// log.Print("page:", page, "pageSize:", pageSize, "sortBy:", sortBy, "sortOrder:", sortOrder, "filterBy:", filterBy, "personID:", personID)
 
 		// Query the database for files
 		mediaItems, totalFiles, err := getMediaItemsFilteredAndSorted(db, page, pageSize, sortBy, filterBy, sortOrder, personID)
@@ -901,4 +894,20 @@ func getExifNameValueMap(filePath string, tagNames []string) (map[string]string,
 	}
 
 	return result, nil
+}
+
+func doPythonClustering() {
+	cmd := exec.Command("/home/orkiman/vscodeProjects/go/orkisMediaGallery/myDeepFaceVenv/bin/python3", "face_grouping.py")
+	err := cmd.Start() // Run the script asynchronously
+	if err != nil {
+		log.Fatalf("Failed to start Python script: %v", err)
+	}
+
+	// Do other work in Go while the script runs
+
+	err = cmd.Wait() // Wait for the script to finish
+	if err != nil {
+		log.Fatalf("Python script finished with error: %v", err)
+	}
+
 }
