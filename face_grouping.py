@@ -156,7 +156,11 @@ def extractAndSaveEmbeddingsFromImage(conn, cursor, imageOrPath, media_ID, video
     
     # Get embeddings from DeepFace
     model_name = "Dlib"
-    embeddings_data = DeepFace.represent(img_path=imageOrPath, model_name=model_name, enforce_detection=False, detector_backend="retinaface")
+    try:
+        embeddings_data = DeepFace.represent(img_path=imageOrPath, model_name=model_name, enforce_detection=True, detector_backend="retinaface")
+    except Exception as e:
+        # no face detected
+        return
     
     for data in embeddings_data:
         embedding = data['embedding']
