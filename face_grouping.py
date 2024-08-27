@@ -39,7 +39,7 @@ def get_unmapped_media_paths(conn, cursor):
     return unmapped_media
  
     
-def extract_frames_from_video(video_path, interval=20):
+def extract_frames_from_video(video_path, interval=100):
     video = cv2.VideoCapture(video_path)
     frames = []
     frame_count = 0
@@ -58,6 +58,10 @@ def extract_frames_from_video(video_path, interval=20):
     video.release()
     return frames
 
+def clearClustering(conn, cursor):
+    cursor.execute("DELETE personID FROM faceEmbeddings")
+    cursor.execute("DELETE FROM Persons")
+    conn.commit()
 
 def clusterEmbeddings(conn , cursor):
     cursor.execute("SELECT * FROM faceEmbeddings WHERE PERSONID IS NULL")
@@ -218,6 +222,9 @@ def extractAndSaveEmbeddingsFromImage(conn, cursor, imageOrPath, media_ID, video
 
 
 def handleUnprocessedMediaItems(conn, cursor):
+    print("from python handleUnprocessedMediaItems started", flush=True)
+    # print("testing printing and returning")
+    # return
     # this method will 
     # 1.get unprocessed MediaItems
     # 2.extract and save face embeddings in faceEmbeddings table 
@@ -237,17 +244,28 @@ def handleUnprocessedMediaItems(conn, cursor):
         '''
         cursor.execute(quary)
         facesUnprocessedMediaItems = cursor.fetchall()
-        # 2. Iterate each media item and save its embeddings
+        # 2. Iterate each media item and save its embeddings save every X items
+        processed_items = []
+        chunkSize = 10
+        itemsLeft = len(facesUnprocessedMediaItems)
         for media_item_info in facesUnprocessedMediaItems:
             mediaID, media_path, media_type = media_item_info 
-            print(f"Processing: {media_path} (Type: {media_type})")
+            print(f"Processing: {media_path} (Type: {media_type})", flush=True)
             if media_type == "image":
                 extractAndSaveEmbeddingsFromImage(conn, cursor, media_path, mediaID)
             elif media_type == "video":
                 extracted_frames = extract_frames_from_video(media_path)
                 for frame, frameNumber in extracted_frames:
                     extractAndSaveEmbeddingsFromImage(conn, cursor, frame, mediaID, frameNumber)
-        print(f"prcessed {len(facesUnprocessedMediaItems)} items")
+            processed_items.append(mediaID)
+            if len(processed_items) % chunkSize == 0:
+                cursor.execute("DELETE FROM facesUnprocessedMediaItems WHERE mediaID IN " + str(tuple(processed_items)))
+                conn.commit()
+                processed_items = []
+                itemsLeft = itemsLeft - chunkSize
+                print (f"items left for processing: {itemsLeft}", flush=True)
+
+        # print(f"prcessed {len(facesUnprocessedMediaItems)} items")
 
         # Clear unprocessed media items
         # disable for testing
@@ -255,7 +273,7 @@ def handleUnprocessedMediaItems(conn, cursor):
         
         #  Commit after all operations are successful
         conn.commit()
-
+        
         # 3. Cluster embeddings after committing
         clusterEmbeddings(conn, cursor)
 
@@ -283,6 +301,7 @@ def main():
 
     createFaceEmbeddingsTable(conn, cursor)
     create_persons_table(conn, cursor)
+    # clearClustering(conn, cursor)
     handleUnprocessedMediaItems(conn, cursor)
 
     conn.close()

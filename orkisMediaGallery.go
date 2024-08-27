@@ -2,6 +2,7 @@ package main
 
 // name change test
 import (
+	"bufio"
 	"bytes"
 	"database/sql"
 	"encoding/json"
@@ -139,15 +140,15 @@ func main() {
 		return
 	}
 
-	if processedFilesCounter > 0 {
+	if processedFilesCounter > 0 || true { // do clustring anyway
 		// run clustering
 		doPythonClustering()
 	}
 
 	printDatabaseLength(db)
 	// testCv()
-	http.HandleFunc("/", basicAuth(handleRootDirectoryRequests))
-
+	// http.HandleFunc("/", basicAuth(handleRootDirectoryRequests))
+	http.Handle("/", basicAuth(http.HandlerFunc(handleRootDirectoryRequests)))
 	http.Handle("/media/", basicAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.StripPrefix("/media/", http.FileServer(http.Dir(mediaDir))).ServeHTTP(w, r)
 	})))
@@ -162,6 +163,7 @@ func main() {
 		// for production:
 		fmt.Println("Server starting on port 8443...")
 		err = http.ListenAndServeTLS(":8443", certFile, keyFile, nil)
+		fmt.Println("after ListenAndServeTLS")
 		if err != nil {
 			fmt.Println("Failed to start server:", err)
 		}
@@ -192,6 +194,11 @@ func deleteAll() {
 }
 
 func handleRootDirectoryRequests(w http.ResponseWriter, r *http.Request) {
+	smiley := r.URL.Path
+	if smiley == "/smiley.jpeg" {
+		http.ServeFile(w, r, "smiley.jpeg")
+		return
+	}
 	path := filepath.Join(mediaDir, r.URL.Path)
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
@@ -519,7 +526,7 @@ func orginizeNewFiles() (processedFilesCounter int, err error) {
 	return processedFilesCounter, nil
 }
 
-func processFile(originalFilePath string) error {
+func processFileOld(originalFilePath string) error {
 	fileExists, exsistingName := isFileAllreadyExistsInSqlDb(db, originalFilePath)
 	if fileExists {
 		err := os.Rename(originalFilePath, filepath.Join(duplicatesDir,
@@ -577,6 +584,106 @@ func processFile(originalFilePath string) error {
 		log.Panic(err)
 	}
 	return err
+}
+
+func processFile(filePath string) error {
+	// if file heic - convert it to jpg first
+	if filepath.Ext(filePath) == ".heic" {
+		originalHeicPath := filePath
+		var err error
+		filePath, err = convertHeicToJpg(filePath, uploadDir)
+		if err != nil {
+			log.Println(err)
+			return fmt.Errorf("error converting HEIC to JPEG: %w", err)
+		}
+		// move heic to outer folder
+		newHeicPath := filepath.Join(heicDir, filepath.Base(originalHeicPath))
+		err = os.Rename(originalHeicPath, newHeicPath)
+		if err != nil {
+			return fmt.Errorf("error moving HEIC file: %w", err)
+		}
+	}
+	fileExists, exsistingName := isFileAllreadyExistsInSqlDb(db, filePath)
+	if fileExists {
+		err := os.Rename(filePath, filepath.Join(duplicatesDir,
+			filepath.Base(filePath)+"_alreadyExsistsInDataBaseWithTheName_"+exsistingName))
+		if err != nil {
+			return fmt.Errorf("error moving file: %w", err)
+		}
+		return nil
+	}
+	uniqueName, err := generateUniqueFileName(db, filepath.Base(filePath))
+
+	if err != nil {
+		return fmt.Errorf("error generating unique file name: %w", err)
+	}
+	// filepath.Join(filepath.Dir(originalFilePath), uniqueName)
+
+	if isVideoFile(filePath) {
+		if err := generateVideoThumbnail(filePath, uniqueName, thumbnailDir); err != nil {
+			return fmt.Errorf("error generating thumbnail for video \"%s\": %w", filePath, err)
+		}
+		if err := os.Rename(filePath, filepath.Join(mediaDir, uniqueName)); err != nil {
+			return fmt.Errorf("error moving video file: %w", err)
+		}
+	} else if isImage(filePath) {
+		if err := generatePhotoThumbnail(filePath, uniqueName, thumbnailDir); err != nil {
+			log.Println(err)
+			return fmt.Errorf("error generating thumbnail for image: %w", err)
+		}
+		if err := os.Rename(filePath, filepath.Join(mediaDir, uniqueName)); err != nil {
+			return fmt.Errorf("error moving image file: %w", err)
+		}
+
+	} else {
+		return fmt.Errorf("unsupported file type: %s", filePath)
+	}
+
+	mediaItem, err := insertNewMediaToSqlDbAndGetNewMediaItem(db, filepath.Join(mediaDir, uniqueName))
+	if err != nil {
+		log.Panic(err)
+		return err
+	}
+	// _, err = insertMediaToDb(filepath.Join(mediaDir, uniqueName))
+	err = insertMediaToFacesUnprocessedMediaItemsTable(db, &mediaItem)
+	if err != nil {
+		log.Panic(err)
+	}
+	return err
+}
+func convertHeicToJpg(orgininalFilePath, targetDir string) (jpgPath string, err error) {
+
+	jpgName := strings.TrimSuffix(filepath.Base(orgininalFilePath), filepath.Ext(orgininalFilePath)) + ".jpg"
+	jpgName, err = getUniqueFileName(jpgName, targetDir)
+	if err != nil {
+		return "", err
+	}
+	jpgPath = filepath.Join(targetDir, jpgName)
+	cmd := exec.Command("convert", orgininalFilePath, jpgPath)
+	err = cmd.Run()
+	if err != nil {
+		return "", err
+	}
+	return jpgPath, nil
+}
+
+func getUniqueFileName(fileName string, dir string) (string, error) {
+	var uniqueName = fileName
+	var counter = 0
+
+	for {
+		_, err := os.Stat(filepath.Join(dir, uniqueName))
+		if err != nil {
+			if os.IsNotExist(err) {
+				return uniqueName, nil
+			}
+			return "", err
+		}
+		counter++
+		ext := filepath.Ext(fileName)
+		baseName := strings.TrimSuffix(fileName, ext)
+		uniqueName = fmt.Sprintf("%s(%d)%s", baseName, counter, ext)
+	}
 }
 
 func convertHeicToJpegAndGenerateThumbnail(originalHeicPath string, uniqueName string, mediaDir string, heicDir string, thumbnailDir string) error {
@@ -896,18 +1003,71 @@ func getExifNameValueMap(filePath string, tagNames []string) (map[string]string,
 	return result, nil
 }
 
+// func doPythonClustering() {
+// 	log.Println("Python clustering script starting")
+
+// 	cmd := exec.Command("/home/orkiman/vscodeProjects/go/orkisMediaGallery/myDeepFaceVenv/bin/python3", "face_grouping.py")
+
+// 	if err := cmd.Start(); err != nil {
+// 		log.Fatal(err)
+// 	}
+
+// 	// Do other work in Go while the script runs
+
+// 	go func() { // Wait for the script to finish
+// 		err := cmd.Wait()
+// 		log.Println("Python clustering script finished")
+// 		if err != nil {
+// 			log.Fatalf("Python script finished with error: %v", err)
+// 		}
+// 	}()
+
+// }
+
 func doPythonClustering() {
+	log.Println("Python clustering script starting")
+
 	cmd := exec.Command("/home/orkiman/vscodeProjects/go/orkisMediaGallery/myDeepFaceVenv/bin/python3", "face_grouping.py")
-	err := cmd.Start() // Run the script asynchronously
+
+	// Create pipes for stdout and stderr
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		log.Fatalf("Failed to start Python script: %v", err)
+		log.Fatal(err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	// Do other work in Go while the script runs
-
-	err = cmd.Wait() // Wait for the script to finish
-	if err != nil {
-		log.Fatalf("Python script finished with error: %v", err)
+	// Start the command
+	if err := cmd.Start(); err != nil {
+		log.Fatal(err)
 	}
 
+	// Read from stdout and stderr in separate goroutines
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			log.Println("Python stdout:", scanner.Text())
+		}
+	}()
+
+	go func() {
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			log.Println("Python stderr:", scanner.Text())
+		}
+	}()
+
+	// Wait for the command to finish in a separate goroutine
+	go func() {
+		err := cmd.Wait()
+		if err != nil {
+			log.Printf("Python script finished with error: %v", err)
+		} else {
+			log.Println("Python clustering script finished successfully")
+		}
+	}()
+
+	log.Println("doPythonClustering function returning, Python script running in background")
 }
