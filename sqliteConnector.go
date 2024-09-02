@@ -698,7 +698,7 @@ func getFaceImagesBase64FromImage(img gocv.Mat, facialAreaJSON string) (string, 
 	return imgBase64Str, nil
 }
 
-func getImageFromVideoPath(videoPath string, frameNUmber int) (gocv.Mat, error) {
+func getImageFromVideoPathOld(videoPath string, frameNUmber int) (gocv.Mat, error) {
 
 	// Open the video file
 	v, err := gocv.VideoCaptureFile(videoPath)
@@ -716,6 +716,26 @@ func getImageFromVideoPath(videoPath string, frameNUmber int) (gocv.Mat, error) 
 		return gocv.NewMat(), fmt.Errorf("failed to read frame")
 	}
 	defer frame.Close()
+
+	return frame, nil
+}
+
+func getImageFromVideoPath(videoPath string, frameNumber int) (gocv.Mat, error) {
+	// Open the video file
+	v, err := gocv.VideoCaptureFile(videoPath)
+	if err != nil {
+		return gocv.NewMat(), fmt.Errorf("failed to open video file: %v", err)
+	}
+	defer v.Close()
+
+	// Set the frame number
+	v.Set(gocv.VideoCapturePosFrames, float64(frameNumber))
+
+	// Read the frame
+	frame := gocv.NewMat()
+	if ok := v.Read(&frame); !ok {
+		return gocv.NewMat(), fmt.Errorf("failed to read frame")
+	}
 
 	return frame, nil
 }
@@ -782,7 +802,7 @@ func getOneImagePerPerson(db *sql.DB) ([]Face, error) {
 
 		// Make sure to close the Mat after processing
 		defer img.Close()
-
+		// showImage(img)
 		face, err := getFaceImagesBase64FromImage(img, facialAreaJSON)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get face image data for personID %d: %v", personID, err)
@@ -800,4 +820,102 @@ func getOneImagePerPerson(db *sql.DB) ([]Face, error) {
 	}
 
 	return faces, nil
+}
+
+func getOneImagePerPersonWithoutPersonsTable(db *sql.DB) ([]Face, error) {
+
+	var faces []Face
+	var personID int
+	var absoluteFilePath string
+	var facialAreaJSON string
+	var mediaType string
+	var videoFrameNumber int
+	var mediaCount int
+
+	query := `
+		SELECT 
+			fe.personID,
+			m.absoluteFilePath,
+			fe.facial_area,
+			m.mediaType,
+			fe.videoFrameNumber,
+			COUNT(DISTINCT fe.mediaID) AS mediaCount
+		FROM 
+			faceEmbeddings fe
+		JOIN 
+			mediaItems m ON fe.mediaID = m.mediaID
+		GROUP BY 
+			fe.personID
+		ORDER BY 
+			mediaCount DESC;
+			`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query database: %v", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		if err := rows.Scan(&personID, &absoluteFilePath, &facialAreaJSON, &mediaType, &videoFrameNumber, &mediaCount); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %v", err)
+		}
+
+		var img gocv.Mat
+		if mediaType == "image" {
+			img = gocv.IMRead(absoluteFilePath, gocv.IMReadColor)
+			if img.Empty() {
+				return nil, fmt.Errorf("failed to read image from path %s", absoluteFilePath)
+			}
+		} else if mediaType == "video" {
+			img, err = getImageFromVideoPath(absoluteFilePath, videoFrameNumber)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get image from video at path %s, frame %d: %v", absoluteFilePath, videoFrameNumber, err)
+			}
+		}
+
+		// Make sure to close the Mat after processing
+		defer img.Close()
+		// showImage(img)
+		face, err := getFaceImagesBase64FromImage(img, facialAreaJSON)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get face image data for personID %d: %v", personID, err)
+		}
+
+		faces = append(faces, Face{
+			ImageData:  face,
+			PersonID:   strconv.Itoa(personID),
+			MediaCount: strconv.Itoa(mediaCount),
+		})
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error encountered while iterating rows: %v", err)
+	}
+
+	return faces, nil
+}
+
+func showImage(img gocv.Mat) {
+	originalWidth := img.Cols()
+	originalHeight := img.Rows()
+
+	// Calculate the new dimensions, keeping the aspect ratio
+	newWidth := 200
+	newHeight := (newWidth * originalHeight) / originalWidth
+
+	// Resize the image
+	resizedImg := gocv.NewMat()
+	defer resizedImg.Close()
+	gocv.Resize(img, &resizedImg, image.Pt(newWidth, newHeight), 0, 0, gocv.InterpolationLinear)
+
+	// Create a window to display the resized image
+	window := gocv.NewWindow("Resized Image")
+	defer window.Close()
+
+	// Show the resized image in the window
+	window.IMShow(resizedImg)
+
+	// Wait until a key is pressed
+	gocv.WaitKey(0)
 }

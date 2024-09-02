@@ -59,12 +59,15 @@ def extract_frames_from_video(video_path, interval=100):
     return frames
 
 def clearClustering(conn, cursor):
-    cursor.execute("DELETE personID FROM faceEmbeddings")
+    cursor.execute("UPDATE faceEmbeddings SET personID = NULL")
     cursor.execute("DELETE FROM Persons")
     conn.commit()
+    print ("clustering cleared")
 
 def clusterEmbeddings(conn , cursor):
+    print("clustering started")
     cursor.execute("SELECT * FROM faceEmbeddings WHERE PERSONID IS NULL")
+    # cursor.execute("SELECT * FROM faceEmbeddings WHERE PERSONID IS NULL ORDER BY embeddingID DESC")
     faceEmbeddings_rows = cursor.fetchall()
     model_name = "Dlib"
     # iterating unpamed face embeddings from faceEmbeddings table
@@ -89,6 +92,7 @@ def clusterEmbeddings(conn , cursor):
         if distances:
             min_distance_idx = min(enumerate(distances), key=lambda x: x[1][1])[0]
             threshold = thresholds[model_name]['cosine']
+            threshold = 0.069
             if distances[min_distance_idx][1] < threshold :  # Adjust threshold as needed
                 #update person table
                 personID = distances[min_distance_idx][0]
@@ -126,8 +130,81 @@ def clusterEmbeddings(conn , cursor):
 
         # Commit the changes to the database
         conn.commit()
+    print("clustering done")
+
+
+
+
+
+
+
+def cluster_embeddings_without_average(conn, cursor):
+    # iterate new embeddings
+    # for each one, pass recognized embeddings list to get_closest_embedding
+    # if found, update personID    
+    # if not found, insert as new person
+    # anyway add them to recognized embedding list
+    
+    print("Clustering started")
+    cursor.execute("SELECT embeddingID, embedding FROM faceEmbeddings WHERE personID IS NULL")
+    new_embeddings_list = cursor.fetchall()  
+    cursor.execute("SELECT embeddingID, embedding, personID FROM faceEmbeddings WHERE personID IS NOT NULL")
+    recognized_embeddings_list = cursor.fetchall()
+
+    # iterating unnamed face embeddings from faceEmbeddings table
+    for new_embedding_tuple in new_embeddings_list:
+        
+        matching_embedding_tuple = get_closest_embedding(new_embedding_tuple, recognized_embeddings_list)
+        if matching_embedding_tuple is not None:
+            # found existing person
+            # update db
+            personID = matching_embedding_tuple[2]
+            
+        else:
+            # insert new person
+            cursor.execute("INSERT INTO PERSONS (faceSampleEmbeddingID) VALUES (?)",
+                           (new_embedding_tuple[0],))
+            personID = cursor.lastrowid            
+        cursor.execute("UPDATE faceEmbeddings SET personID=? WHERE embeddingID=?",
+                           (personID, new_embedding_tuple[0]))
+        # create a new tuple with personID and add it to the recognized list
+        new_embedding_tuple = (new_embedding_tuple[0], new_embedding_tuple[1], personID)
+        recognized_embeddings_list.append(new_embedding_tuple)
+    
+    # Commit the transaction
+    conn.commit()
+
+
+            
+
+    
                  
-   
+def get_closest_embedding(new_embedding_tuple, recognized_embeddings_list):
+    # this func gets new embedding and list of recognized embeddings
+    # returns the closest embedding in the list from the recognized embedding
+    # as tuple, if not found, returns None
+    model_name = "Dlib"
+    min_distance = float('inf')
+    matchingEmbeddingTuple = None
+    
+    embedding_id_1, serialized_new_embedding = new_embedding_tuple
+
+    new_embedding = np.frombuffer(serialized_new_embedding, dtype=np.float64)
+
+    
+    for recognized_embedding_tuple in recognized_embeddings_list:
+        embedding_id_2, serialized_recognized_embedding, personID = recognized_embedding_tuple
+        recognized_embedding = np.frombuffer(serialized_recognized_embedding, dtype=np.float64)
+        # distance = verification.find_euclidean_distance(new_embedding, recognized_embedding)
+        distance = verification.find_cosine_distance(new_embedding, recognized_embedding)
+        if distance < min_distance and distance < thresholds[model_name]['cosine']:
+        # if distance < min_distance and distance < 0.06 :#thresholds[model_name]['cosine']:
+            min_distance = distance
+            matchingEmbeddingTuple = recognized_embedding_tuple
+    
+    if matchingEmbeddingTuple is not None:
+        print("found. distance: ", min_distance)
+    return matchingEmbeddingTuple 
 
 def create_persons_table(conn, cursor):
     cursor.execute('''
@@ -159,10 +236,12 @@ def createFaceEmbeddingsTable(conn, cursor):
 def extractAndSaveEmbeddingsFromImage(conn, cursor, imageOrPath, media_ID, video_frame_number = 0):
     
     # Get embeddings from DeepFace
-    model_name = "Dlib"
+    # model_name = "Dlib"
+    model_name = "ArcFace"
     try:
         embeddings_data = DeepFace.represent(img_path=imageOrPath, model_name=model_name, enforce_detection=True, detector_backend="retinaface")
     except Exception as e:
+        print("no face detected or other error : ", e)
         # no face detected
         return
     
@@ -177,52 +256,9 @@ def extractAndSaveEmbeddingsFromImage(conn, cursor, imageOrPath, media_ID, video
                        (serialized_embedding, media_ID, json.dumps(facial_area),  video_frame_number))
 
 
-# def old_handleUnprocessedMediaItems(conn, cursor):
-#     # this method will 
-#     # 1.get unprocessed MediaItems
-#     # 2.extract and save face embeddings in faceEmbeddings table 
-#     # 3.cluster them into Persons Table
-
-#     try:
-#         # 1. Get the unprocessed MediaItems
-#         facesUnprocessedMediaItems = get_unmapped_media_paths(conn, cursor)
-#         if not facesUnprocessedMediaItems:
-#             print("No unprocessed media items found.")
-#             return
-        
-#         # 2. Iterate each media item and save its embeddings
-#         for media_item in facesUnprocessedMediaItems:
-#             id, media_path, media_type = media_item
-#             print(f"Processing: {media_path} (Type: {media_type})")
-#             if media_type == "image":
-                
-#                 extractAndSaveEmbeddingsFromImage(conn, cursor, media_path, media_path, media_type)
-#             elif media_type == "video":
-#                 extracted_frames = extract_frames_from_video(media_path)
-#                 for frame, frameNumber in extracted_frames:
-#                     extractAndSaveEmbeddingsFromImage(conn, cursor, frame, media_path, media_type, frameNumber)
-#         print(f"prcessed {len(facesUnprocessedMediaItems)} items")
-        
-#         # Clear unprocessed media items
-
-#         # disable for testing
-#         cursor.execute("DELETE FROM facesUnprocessedMediaItems")
-        
-#         #  Commit after all operations are successful
-#         conn.commit()
-
-#         # 3. Cluster embeddings after committing
-#         clusterEmbeddings(conn, cursor)
-
-#     except Exception as e:
-#         # Roll back in case of any failure
-#         conn.rollback()
-#         print(f"An error occurred: {e}")
-#         raise  # Optionally re-raise the error if you want it to propagate
-
 
 def handleUnprocessedMediaItems(conn, cursor):
-    print("from python handleUnprocessedMediaItems started", flush=True)
+    print("handleUnprocessedMediaItems started", flush=True)
     # print("testing printing and returning")
     # return
     # this method will 
@@ -274,8 +310,8 @@ def handleUnprocessedMediaItems(conn, cursor):
         #  Commit after all operations are successful
         conn.commit()
         
-        # 3. Cluster embeddings after committing
-        clusterEmbeddings(conn, cursor)
+        # # 3. Cluster embeddings after committing
+        # clusterEmbeddings(conn, cursor)
 
     except Exception as e:
         # Roll back in case of any failure
@@ -283,6 +319,173 @@ def handleUnprocessedMediaItems(conn, cursor):
         print(f"An error occurred: {e}")
         raise  # Optionally re-raise the error if you want it to propagate
 
+
+
+import networkx as nx
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+
+def chinese_whispers_fix_iterations(embeddings, threshold=0.5, iterations=20):
+
+    # Step 0: Normalize the embeddings
+    # normalized_embeddings = [embedding / np.linalg.norm(embedding) for embedding in embeddings]
+    embeddings = [embedding / np.linalg.norm(embedding) for embedding in embeddings]
+    
+    # Step 1: Construct the graph
+    G = nx.Graph()
+
+    for i, embedding in enumerate(embeddings):
+        G.add_node(i)
+
+    # Step 2: Add edges based on similarity
+    similarity_matrix = cosine_similarity(embeddings)
+    
+    for i in range(len(embeddings)):
+        for j in range(i + 1, len(embeddings)):
+            if similarity_matrix[i, j] > threshold:
+                G.add_edge(i, j, weight=similarity_matrix[i, j])
+
+    # Step 3: Initialize labels
+    for node in G.nodes():
+        G.nodes[node]['label'] = node
+
+    # Step 4: Run the Chinese Whispers algorithm
+    for _ in range(iterations):
+        nodes = list(G.nodes())
+        np.random.shuffle(nodes)
+        
+        for node in nodes:
+            neighbors = G[node]
+            if not neighbors:
+                continue
+            
+            # Get the labels of the neighbors
+            labels = [G.nodes[neighbor]['label'] for neighbor in neighbors]
+            # Assign the most frequent label to the current node
+            most_frequent_label = max(set(labels), key=labels.count)
+            G.nodes[node]['label'] = most_frequent_label
+
+    # Step 5: Extract clusters
+    clusters = {}
+    for node in G.nodes():
+        label = G.nodes[node]['label']
+        if label not in clusters:
+            clusters[label] = []
+        clusters[label].append(node)
+
+    return list(clusters.values())
+
+def chinese_whispers(embeddings, threshold=0.5, max_iterations=100, stability_check=15):
+
+    # Step 0: Normalize the embeddings
+    embeddings = [embedding / np.linalg.norm(embedding) for embedding in embeddings]
+    
+    # Step 1: Construct the graph
+    G = nx.Graph()
+
+    for i, embedding in enumerate(embeddings):
+        G.add_node(i)
+
+    # Step 2: Add edges based on similarity
+    similarity_matrix = cosine_similarity(embeddings)
+    
+    for i in range(len(embeddings)):
+        for j in range(i + 1, len(embeddings)):
+            if similarity_matrix[i, j] > threshold:
+                G.add_edge(i, j, weight=similarity_matrix[i, j])
+
+    # Step 3: Initialize labels
+    for node in G.nodes():
+        G.nodes[node]['label'] = node
+
+    # Step 4: Run the Chinese Whispers algorithm with stability check
+    stable_iterations = 0
+    for iteration in range(max_iterations):
+        nodes = list(G.nodes())
+        np.random.shuffle(nodes)
+        
+        changes = 0
+        for node in nodes:
+            neighbors = G[node]
+            if not neighbors:
+                continue
+            
+            # Get the labels of the neighbors
+            labels = [G.nodes[neighbor]['label'] for neighbor in neighbors]
+            # Assign the most frequent label to the current node
+            most_frequent_label = max(set(labels), key=labels.count)
+            
+            if G.nodes[node]['label'] != most_frequent_label:
+                G.nodes[node]['label'] = most_frequent_label
+                changes += 1
+        
+        # If no changes occurred, count towards stability
+        if changes == 0:
+            stable_iterations += 1
+        else:
+            stable_iterations = 0  # Reset stability count if there were changes
+
+        # Stop if the graph has been stable for the required number of iterations
+        if stable_iterations >= stability_check:
+            print(f"Converged after {iteration+1} iterations with stability check.")
+            break
+
+    # Step 5: Extract clusters
+    clusters = {}
+    for node in G.nodes():
+        label = G.nodes[node]['label']
+        if label not in clusters:
+            clusters[label] = []
+        clusters[label].append(node)
+
+    return list(clusters.values())
+
+# Usage example
+# embeddings = np.random.rand(100, 512)  # Replace with your actual embeddings
+# clusters = chinese_whispers(embeddings, threshold=0.7, iterations=20)
+
+# print(f"Number of clusters: {len(clusters)}")
+
+def prepareAndClusterChineseWhispers(conn, cursor):
+    cursor.execute("SELECT * FROM faceEmbeddings")
+    faceEmbeddings_rows = cursor.fetchall()
+    embeddings = []
+    for faceEmbeddings_row in faceEmbeddings_rows:
+        # embeddingID = faceEmbeddings_row["embeddingID"]
+        # Deserialize the stored binary data back into a numpy array
+        serialized_face_embedding = faceEmbeddings_row["embedding"]
+        face_embedding = np.frombuffer(serialized_face_embedding, dtype=np.float64)
+        embeddings.append(face_embedding)
+
+    # clusters = chinese_whispers(embeddings, threshold=0.41, max_iterations=100)
+    clusters = chinese_whispers_fix_iterations(embeddings, threshold=0.41, iterations=50)
+    print(f"Number of clusters: {len(clusters)}")
+    personID = 0
+    for cluster in clusters:
+        print(f"Cluster {personID}: {cluster}")
+        if not cluster:
+            continue  # Skip empty clusters
+
+        # # updateDatabase
+        # cursor.execute("INSERT INTO PERSONS (faceSampleEmbeddingID) VALUES (?)", (faceEmbeddings_rows[0]["embeddingID"],))                        
+        # personID = cursor.lastrowid 
+        
+        # Convert the cluster list to a tuple
+        if len(cluster) == 1:
+            cluster_str = f"({cluster[0]})"  # Handle single-item clusters correctly
+        else:
+            cluster_str = str(tuple(cluster))    
+          
+        # Debugging output to check the generated SQL query
+        # print(f"UPDATE faceEmbeddings SET personID = ? WHERE embeddingID IN {cluster_str}", (personID,))
+        
+        # Execute the SQL UPDATE statement
+        cursor.execute(f"UPDATE faceEmbeddings SET personID = ? WHERE embeddingID -1 IN {cluster_str}", (personID,))
+
+        personID += 1
+        
+
+    conn.commit() 
 
 
 
@@ -301,9 +504,11 @@ def main():
 
     createFaceEmbeddingsTable(conn, cursor)
     create_persons_table(conn, cursor)
-    # clearClustering(conn, cursor)
+    clearClustering(conn, cursor)
     handleUnprocessedMediaItems(conn, cursor)
-
+    # clusterEmbeddings(conn, cursor)
+    # cluster_embeddings_without_average(conn, cursor)
+    prepareAndClusterChineseWhispers(conn, cursor)
     conn.close()
 
 if __name__ == "__main__":
