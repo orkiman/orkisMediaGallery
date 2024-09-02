@@ -121,31 +121,8 @@ func main() {
 	os.MkdirAll(duplicatesDir, 0755)
 	os.MkdirAll(binDir, 0755)
 
-	// mediaDb, err := openBboltDb()
-	// if err != nil {
-	// 	fmt.Println("Error:", err)
-	// 	return
-	// }
-	// defer mediaDb.Close()
+	processNewFilesInBkgrnd()
 
-	// err = deleteMedia([]string{"20231211_120532.jpg"})
-	// if err != nil {
-	// 	fmt.Println("Error:", err)
-	// }
-
-	var processedFilesCounter int
-	processedFilesCounter, err = orginizeNewFiles()
-	if err != nil {
-		fmt.Println("Error:", err)
-		return
-	}
-
-	if processedFilesCounter > 0 || true { // do clustring anyway
-		// run clustering
-		doPythonClustering()
-	}
-
-	printDatabaseLength(db)
 	// testCv()
 	// http.HandleFunc("/", basicAuth(handleRootDirectoryRequests))
 	http.Handle("/", basicAuth(http.HandlerFunc(handleRootDirectoryRequests)))
@@ -195,8 +172,8 @@ func deleteAll() {
 
 func handleRootDirectoryRequests(w http.ResponseWriter, r *http.Request) {
 	smiley := r.URL.Path
-	if smiley == "/smiley.jpeg" {
-		http.ServeFile(w, r, "smiley.jpeg")
+	if smiley == "/smiley.png" {
+		http.ServeFile(w, r, "smiley.png")
 		return
 	}
 	path := filepath.Join(mediaDir, r.URL.Path)
@@ -336,7 +313,7 @@ func handleRootDirectoryRequests(w http.ResponseWriter, r *http.Request) {
 
 func processFacesTemplate(w http.ResponseWriter, r *http.Request) {
 
-	faces, err := getOneImagePerPerson(db)
+	faces, err := getOneImagePerPersonWithoutPersonsTable(db)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1069,5 +1046,22 @@ func doPythonClustering() {
 		}
 	}()
 
-	log.Println("doPythonClustering function returning, Python script running in background")
+}
+func processNewFilesInBkgrnd() {
+	go func() {
+		processedFilesCounter, err := orginizeNewFiles()
+		if err != nil {
+			fmt.Println("Error:", err)
+			return
+		}
+
+		if processedFilesCounter > 0 || true { // do clustring anyway
+			// run clustering
+			doPythonClustering()
+		}
+
+		printDatabaseLength(db)
+
+	}()
+
 }

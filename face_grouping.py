@@ -39,7 +39,7 @@ def get_unmapped_media_paths(conn, cursor):
     return unmapped_media
  
     
-def extract_frames_from_video(video_path, interval=100):
+def extract_frames_from_video_slow(video_path, interval=100):
     video = cv2.VideoCapture(video_path)
     frames = []
     frame_count = 0
@@ -54,6 +54,29 @@ def extract_frames_from_video(video_path, interval=100):
             frames.append((frame, frame_count))
         
         frame_count += 1
+    
+    video.release()
+    return frames
+
+def extract_frames_from_video(video_path, interval=100):
+    video = cv2.VideoCapture(video_path)
+    frames = []
+    frame_count = 0
+    
+    while True:
+        # Set the video position to the desired frame
+        video.set(cv2.CAP_PROP_POS_FRAMES, frame_count)
+        
+        success, frame = video.read()
+        if not success:
+            break
+        
+        # Append a tuple containing both the frame and the frame number
+        frames.append((frame, frame_count))
+        
+        # Move to the next frame of interest
+        frame_count += interval
+        print("Frame count: ", frame_count)
     
     video.release()
     return frames
