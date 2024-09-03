@@ -63,7 +63,7 @@ def extract_frames_from_video(video_path, interval=100):
     frames = []
     frame_count = 0
     
-    while True:
+    while frame_count < 2000: # limit the number of images to 20
         # Set the video position to the desired frame
         video.set(cv2.CAP_PROP_POS_FRAMES, frame_count)
         
