@@ -422,55 +422,6 @@ func checkAuth(username, password string) bool {
 	return username == creds.Username && password == creds.Password
 }
 
-// func orginizeNewFilesConcurrently() (processedFilesCounter int, err error) {
-// 	// not working with onnx for now
-
-// 	embeddingsDb = openEmbeddingsDb()
-// 	defer embeddingsDb.Close()
-// 	numWorkers := 3 // runtime.NumCPU()
-// 	semaphore := make(chan struct{}, numWorkers)
-// 	var wg sync.WaitGroup
-// 	errChan := make(chan error, numWorkers)
-
-// 	go func() {
-// 		defer close(errChan)
-// 		err := filepath.WalkDir(uploadDir, func(path string, entry fs.DirEntry, err error) error {
-// 			if err != nil {
-// 				return err
-// 			}
-
-// 			if !entry.IsDir() {
-// 				wg.Add(1)
-// 				go func(path string) {
-// 					defer wg.Done()
-// 					semaphore <- struct{}{}
-// 					defer func() { <-semaphore }()
-// 					if err := processFile(path, ); err != nil {
-// 						errChan <- err
-// 					}
-// 					processedFilesCounter++
-// 				}(path)
-// 			}
-
-// 			return nil
-// 		})
-
-// 		if err != nil {
-// 			errChan <- err
-// 		}
-
-// 		wg.Wait()
-// 	}()
-
-// 	// Collect and return the first error, if any
-// 	for err := range errChan {
-// 		return processedFilesCounter, err
-// 	}
-
-// 	// printDatabaseMediaItems()
-// 	return processedFilesCounter, nil
-// }
-
 func orginizeNewFiles() (processedFilesCounter int, err error) {
 	// embeddingsDb = openEmbeddingsDb()
 	// defer embeddingsDb.Close()
@@ -487,7 +438,9 @@ func orginizeNewFiles() (processedFilesCounter int, err error) {
 
 		if !entry.IsDir() {
 			if err := processFile(path); err != nil {
-				return err
+				log.Printf("Error processing file %s: %v\n", path, err)
+				// Continue with the next file instead of returning the error
+				return nil
 			}
 			processedFilesCounter++
 		}
@@ -501,66 +454,6 @@ func orginizeNewFiles() (processedFilesCounter int, err error) {
 
 	// printDatabaseMediaItems()
 	return processedFilesCounter, nil
-}
-
-func processFileOld(originalFilePath string) error {
-	fileExists, exsistingName := isFileAllreadyExistsInSqlDb(db, originalFilePath)
-	if fileExists {
-		err := os.Rename(originalFilePath, filepath.Join(duplicatesDir,
-			filepath.Base(originalFilePath)+"_alreadyExsistsInDataBaseWithTheName_"+exsistingName))
-		if err != nil {
-			return fmt.Errorf("error moving file: %w", err)
-		}
-		return nil
-	}
-	uniqueName, err := generateUniqueFileName(db, filepath.Base(originalFilePath))
-	if err != nil {
-		return fmt.Errorf("error generating unique file name: %w", err)
-	}
-	// filepath.Join(filepath.Dir(originalFilePath), uniqueName)
-
-	if isVideoFile(originalFilePath) {
-		if err := generateVideoThumbnail(originalFilePath, uniqueName, thumbnailDir); err != nil {
-			return fmt.Errorf("error generating thumbnail for video \"%s\": %w", originalFilePath, err)
-		}
-		if err := os.Rename(originalFilePath, filepath.Join(mediaDir, uniqueName)); err != nil {
-			return fmt.Errorf("error moving video file: %w", err)
-		}
-	} else if isImage(originalFilePath) {
-		// tagNames := []string{"DateTimeOriginal"}
-		// exifNameValueMap, err := getExifNameValueMap(filePath, tagNames)
-		// if err != nil {
-		// 	return fmt.Errorf("error extracting exif data: %w", err)
-		// }
-		// fmt.Println("original date: ", exifNameValueMap["DateTimeOriginal"])
-		if filepath.Ext(originalFilePath) == ".heic" {
-			if err := convertHeicToJpegAndGenerateThumbnail(originalFilePath, uniqueName, mediaDir, heicDir, thumbnailDir); err != nil {
-				return fmt.Errorf("error converting HEIC to JPEG: %w", err)
-			}
-		} else {
-			if err := generatePhotoThumbnail(originalFilePath, uniqueName, thumbnailDir); err != nil {
-				log.Println(err)
-				return fmt.Errorf("error generating thumbnail for image: %w", err)
-			}
-			if err := os.Rename(originalFilePath, filepath.Join(mediaDir, uniqueName)); err != nil {
-				return fmt.Errorf("error moving image file: %w", err)
-			}
-		}
-	} else {
-		return fmt.Errorf("unsupported file type: %s", originalFilePath)
-	}
-
-	mediaItem, err := insertNewMediaToSqlDbAndGetNewMediaItem(db, filepath.Join(mediaDir, uniqueName))
-	if err != nil {
-		log.Panic(err)
-		return err
-	}
-	// _, err = insertMediaToDb(filepath.Join(mediaDir, uniqueName))
-	err = insertMediaToFacesUnprocessedMediaItemsTable(db, &mediaItem)
-	if err != nil {
-		log.Panic(err)
-	}
-	return err
 }
 
 func processFile(filePath string) error {
