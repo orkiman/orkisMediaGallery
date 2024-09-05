@@ -347,17 +347,17 @@ func handleProcessSelected(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.SelectedAction == "delete" {
-		log.Print("todo: fix delete selected files  - or reclustering logic yet not implemented\n")
-		return
 		for _, mediaIDsAsString := range req.SelectedFiles {
 			mediaID, err := strconv.Atoi(mediaIDsAsString)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
+			fmt.Println("deleting mediaID:", mediaID)
 			err = deleteMedia(db, mediaID)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
+				log.Fatal(err)
 				return
 			}
 		}
@@ -456,9 +456,14 @@ func orginizeNewFiles() (processedFilesCounter int, err error) {
 	return processedFilesCounter, nil
 }
 
+// processFile processes a single file in the upload directory.
+// It checks if the file is a HEIC or MOV file and converts it to a JPEG or MP4 file respectively.
+// It also checks if the file already exists in the database and if so, it moves it to the duplicates directory.
+// Then it generates a unique name for the file and moves it to the media directory.
+// Finally, it inserts the media item into the database and adds it to the facesUnprocessedMediaItems table.
 func processFile(filePath string) error {
-	// if file heic - convert it to jpg first
-	if filepath.Ext(filePath) == ".heic" {
+	// Check if the file is a HEIC or MOV file and convert it to a JPEG or MP4 file respectively.
+	if strings.ToLower(filepath.Ext(filePath)) == ".heic" {
 		originalHeicPath := filePath
 		var err error
 		filePath, err = convertHeicToJpg(filePath, uploadDir)
@@ -466,13 +471,27 @@ func processFile(filePath string) error {
 			log.Println(err)
 			return fmt.Errorf("error converting HEIC to JPEG: %w", err)
 		}
-		// move heic to outer folder
+		// Move the HEIC file to the outer folder.
 		newHeicPath := filepath.Join(heicDir, filepath.Base(originalHeicPath))
 		err = os.Rename(originalHeicPath, newHeicPath)
 		if err != nil {
 			return fmt.Errorf("error moving HEIC file: %w", err)
 		}
 	}
+	if strings.ToLower(filepath.Ext(filePath)) == ".mov" {
+		originalMovPath := filePath
+		var err error
+		filePath, err = convertMovToMp4(filePath, uploadDir)
+		if err != nil {
+			return fmt.Errorf("error converting MOV to MP4: %w", err)
+		}
+		// Delete the MOV file.
+		err = os.Remove(originalMovPath)
+		if err != nil {
+			return fmt.Errorf("error removing MOV file: %w", err)
+		}
+	}
+	// Check if the file already exists in the database and if so, move it to the duplicates directory.
 	fileExists, exsistingName := isFileAllreadyExistsInSqlDb(db, filePath)
 	if fileExists {
 		err := os.Rename(filePath, filepath.Join(duplicatesDir,
@@ -482,13 +501,13 @@ func processFile(filePath string) error {
 		}
 		return nil
 	}
+	// Generate a unique name for the file.
 	uniqueName, err := generateUniqueFileName(db, filepath.Base(filePath))
 
 	if err != nil {
 		return fmt.Errorf("error generating unique file name: %w", err)
 	}
-	// filepath.Join(filepath.Dir(originalFilePath), uniqueName)
-
+	// Generate a thumbnail for the file.
 	if isVideoFile(filePath) {
 		if err := generateVideoThumbnail(filePath, uniqueName, thumbnailDir); err != nil {
 			return fmt.Errorf("error generating thumbnail for video \"%s\": %w", filePath, err)
@@ -508,33 +527,57 @@ func processFile(filePath string) error {
 	} else {
 		return fmt.Errorf("unsupported file type: %s", filePath)
 	}
-
+	// Insert the media item into the database and add it to the facesUnprocessedMediaItems table.
 	mediaItem, err := insertNewMediaToSqlDbAndGetNewMediaItem(db, filepath.Join(mediaDir, uniqueName))
 	if err != nil {
 		log.Panic(err)
 		return err
 	}
-	// _, err = insertMediaToDb(filepath.Join(mediaDir, uniqueName))
 	err = insertMediaToFacesUnprocessedMediaItemsTable(db, &mediaItem)
 	if err != nil {
 		log.Panic(err)
 	}
 	return err
 }
-func convertHeicToJpg(orgininalFilePath, targetDir string) (jpgPath string, err error) {
+func convertHeicToJpg(orginalFilePath, targetDir string) (jpgPath string, err error) {
 
-	jpgName := strings.TrimSuffix(filepath.Base(orgininalFilePath), filepath.Ext(orgininalFilePath)) + ".jpg"
+	jpgName := strings.TrimSuffix(filepath.Base(orginalFilePath), filepath.Ext(orginalFilePath)) + ".jpg"
 	jpgName, err = getUniqueFileName(jpgName, targetDir)
 	if err != nil {
 		return "", err
 	}
 	jpgPath = filepath.Join(targetDir, jpgName)
-	cmd := exec.Command("convert", orgininalFilePath, jpgPath)
+	cmd := exec.Command("convert", orginalFilePath, jpgPath)
 	err = cmd.Run()
 	if err != nil {
 		return "", err
 	}
 	return jpgPath, nil
+}
+
+func convertMovToMp4(originalFilePath, targetDir string) (mp4Path string, err error) {
+	// Create mp4 filename based on the original file
+	mp4Name := strings.TrimSuffix(filepath.Base(originalFilePath), filepath.Ext(originalFilePath)) + ".mp4"
+
+	// Get a unique filename to avoid overwriting existing files
+	mp4Name, err = getUniqueFileName(mp4Name, targetDir)
+	if err != nil {
+		return "", err
+	}
+
+	// Create the full path for the output MP4 file
+	mp4Path = filepath.Join(targetDir, mp4Name)
+
+	// ffmpeg command to re-encode video to H.264 and audio to AAC
+	cmd := exec.Command("ffmpeg", "-i", originalFilePath, "-c:v", "libx264", "-c:a", "aac", "-strict", "experimental", "-b:a", "192k", mp4Path)
+
+	// Run the command
+	err = cmd.Run()
+	if err != nil {
+		return "", err
+	}
+
+	return mp4Path, nil
 }
 
 func getUniqueFileName(fileName string, dir string) (string, error) {
@@ -699,48 +742,6 @@ func getOrientation(imagePath string) (int, error) {
 	return -1, fmt.Errorf("orientation tag not found")
 }
 
-// func getExifDataByTagName(imagePath string, tagName string) (string, error) {
-// 	// this needs more work...
-// 	imageData, err := os.ReadFile(imagePath)
-// 	if err != nil {
-// 		return "", err
-// 	}
-
-// 	rawExif, err := exif.SearchAndExtractExif(imageData)
-// 	if err != nil {
-// 		return "", err
-// 	}
-
-// 	im := exifcommon.NewIfdMapping()
-// 	err = exifcommon.LoadStandardIfds(im)
-// 	if err != nil {
-// 		return "", err
-// 	}
-
-// 	ti := exif.NewTagIndex()
-
-// 	_, index, err := exif.Collect(im, ti, rawExif)
-// 	if err != nil {
-// 		return "", err
-// 	}
-
-// 	// fmt.Println(index.RootIfd.EnumerateTagsRecursively())
-// 	// tagEntry, err := index.RootIfd.FindTagWithName(tagName)
-// 	tagEntry, err := index.RootIfd.FindTagWithName(tagName)
-// 	// tagEntry, err := index.Ifds[1].FindTagWithName("DateTimeOriginal")
-
-// 	if err == nil && len(tagEntry) > 0 {
-// 		tagValue := tagEntry[0]
-// 		value, err := tagValue.Format()
-// 		if err == nil {
-
-// 			return value, nil
-// 		}
-// 	}
-
-// 	return "", err //fmt.Errorf("%s tag not found", tagName)
-// }
-
 func isImage(filename string) bool {
 	ext := strings.ToLower(filepath.Ext(filename))
 	return ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".heic"
@@ -799,40 +800,6 @@ func printAllExifTags(filePath string) error {
 
 	return nil
 }
-
-// func getAllExifEntries(filePath string, tagNames []string) ([]string, error) {
-// 	f, err := os.Open(filePath)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	defer f.Close()
-
-// 	// how to read file as byte array
-// 	file, err := os.Open(filePath)
-// 	if err != nil {
-// 		fmt.Println(err)
-// 		os.Exit(1)
-// 	}
-// 	defer file.Close()
-
-// 	data, err := io.ReadAll(f)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-
-// 	rawExif, err := exif.SearchAndExtractExif(data)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-
-// 	entries, _, err := exif.GetFlatExifDataUniversalSearch(rawExif, nil, true)
-// 	// entries, _, err := exif.GetFlatExifData(rawExif, nil)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	return entries, nil
-
-// }
 
 func getExifNameValueMap(filePath string, tagNames []string) (map[string]string, error) {
 	f, err := os.Open(filePath)
@@ -948,7 +915,7 @@ func processNewFilesInBkgrnd() {
 			return
 		}
 
-		if processedFilesCounter > 0 || true { // do clustring anyway
+		if processedFilesCounter > 0 { //  || true { // do clustring anyway
 			// run clustering
 			doPythonClustering()
 		}

@@ -465,57 +465,54 @@ func testViewFaces(db *sql.DB) {
 }
 
 func deleteMedia(db *sql.DB, mediaID int) error {
-	tx, err := db.Begin()
+	// delete files
+	var absoluteFilePath, localThumbnailPath string
+
+	err := db.QueryRow("SELECT absoluteFilePath ,localThumbnailPath FROM MediaItems WHERE mediaID = ?", mediaID).Scan(&absoluteFilePath, &localThumbnailPath)
 	if err != nil {
+		log.Fatal("Failed to query database:", err)
+		return err
+	}
+	absoluteThumbnailPath := filepath.Join(rootDir, localThumbnailPath)
+	// remove media file
+
+	err = os.Remove(absoluteFilePath)
+	if err != nil {
+		log.Fatal("Failed to remove media file:", err)
+		return err
+	}
+	// remove thumbnail file
+	err = os.Remove(absoluteThumbnailPath)
+	if err != nil {
+		log.Fatal("Failed to remove thumbnail file:", err)
 		return err
 	}
 
-	// remove related persons from persons table. need to reclustering after
-	// stmt := `
-	//         DELETE p
-	//         FROM persons p
-	//         JOIN faceEmbeddings fe ON p.personID = fe.personID
-	//         WHERE fe.mediaID = ?
-	//
-	//    `
+	// remove from db
 
-	// stmt := `
-	// DELETE FROM persons
-	// WHERE personID IN (
-	// 	SELECT p.personID
-	// 	FROM persons p
-	// 	JOIN faceEmbeddings fe ON p.personID = fe.personID
-	// 	WHERE fe.mediaID = ?
-	// )
-	// `
-
-	stmt := "DELETE FROM persons WHERE personID IN (SELECT personID FROM faceEmbeddings WHERE mediaID = ?)"
-
-	if _, err := tx.Exec(stmt, mediaID); err != nil {
-		tx.Rollback()
-		log.Panic(err)
+	// Delete from MediaItems
+	_, err = db.Exec("DELETE FROM MediaItems WHERE mediaID = ?", mediaID)
+	if err != nil {
+		log.Printf("Error deleting from MediaItems: %v", err)
 		return err
 	}
 
-	// remove related embeddings from faceEmbeddings table
-	if _, err := tx.Exec("DELETE FROM faceEmbeddings WHERE mediaID=?", mediaID); err != nil {
-		tx.Rollback()
-		log.Panic(err)
+	// Delete from faceEmbeddings
+	_, err = db.Exec("DELETE FROM faceEmbeddings WHERE mediaID = ?", mediaID)
+	if err != nil {
+		log.Printf("Error deleting from faceEmbeddings: %v", err)
 		return err
 	}
 
-	// finally remove media from MediaItems table
-	if _, err := tx.Exec("DELETE FROM MediaItems WHERE mediaID=?", mediaID); err != nil {
-		tx.Rollback()
-		return err
-	}
-
-	// todo here : reclustering
-	if err := tx.Commit(); err != nil {
+	// Delete from facesUnprocessedMediaItems
+	_, err = db.Exec("DELETE FROM facesUnprocessedMediaItems WHERE mediaID = ?", mediaID)
+	if err != nil {
+		log.Printf("Error deleting from facesUnprocessedMediaItems: %v", err)
 		return err
 	}
 
 	return nil
+
 }
 
 func calculateChecksum(filePath string) (string, error) {

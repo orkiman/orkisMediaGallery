@@ -83,7 +83,6 @@ def extract_frames_from_video(video_path, interval=100):
 
 def clearClustering(conn, cursor):
     cursor.execute("UPDATE faceEmbeddings SET personID = NULL")
-    cursor.execute("DELETE FROM Persons")
     conn.commit()
     print ("clustering cleared")
 
@@ -156,11 +155,6 @@ def clusterEmbeddings(conn , cursor):
     print("clustering done")
 
 
-
-
-
-
-
 def cluster_embeddings_without_average(conn, cursor):
     # iterate new embeddings
     # for each one, pass recognized embeddings list to get_closest_embedding
@@ -196,10 +190,6 @@ def cluster_embeddings_without_average(conn, cursor):
     
     # Commit the transaction
     conn.commit()
-
-
-            
-
     
                  
 def get_closest_embedding(new_embedding_tuple, recognized_embeddings_list):
@@ -228,18 +218,6 @@ def get_closest_embedding(new_embedding_tuple, recognized_embeddings_list):
     if matchingEmbeddingTuple is not None:
         print("found. distance: ", min_distance)
     return matchingEmbeddingTuple 
-
-def create_persons_table(conn, cursor):
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS Persons (
-        personID INTEGER PRIMARY KEY AUTOINCREMENT,
-        avgEmbedding BLOB,
-        faceSampleEmbeddingID INTEGER,
-        embeddingCount INTEGER
-    )
-    ''')
-    conn.commit()
-
 
 
 def createFaceEmbeddingsTable(conn, cursor):
@@ -348,7 +326,7 @@ import networkx as nx
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 
-def chinese_whispers_fix_iterations(embeddings, threshold=0.5, iterations=20):
+def chinese_whispers_fixed_iterations(embeddings, threshold=0.5, iterations=20):
 
     # Step 0: Normalize the embeddings
     # normalized_embeddings = [embedding / np.linalg.norm(embedding) for embedding in embeddings]
@@ -481,7 +459,7 @@ def prepareAndClusterChineseWhispers(conn, cursor):
         embeddings.append(face_embedding)
 
     # clusters = chinese_whispers(embeddings, threshold=0.41, max_iterations=100)
-    clusters = chinese_whispers_fix_iterations(embeddings, threshold=0.41, iterations=50)
+    clusters = chinese_whispers_fixed_iterations(embeddings, threshold=0.41, iterations=50)
     print(f"Number of clusters: {len(clusters)}")
     personID = 0
     for cluster in clusters:
@@ -526,7 +504,6 @@ def main():
     cursor = conn.cursor()
 
     createFaceEmbeddingsTable(conn, cursor)
-    create_persons_table(conn, cursor)
     clearClustering(conn, cursor)
     handleUnprocessedMediaItems(conn, cursor)
     # clusterEmbeddings(conn, cursor)
