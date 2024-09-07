@@ -164,8 +164,8 @@ func deleteAll() {
 	os.RemoveAll(heicDir)
 	os.RemoveAll(duplicatesDir)
 	os.RemoveAll(binDir)
-	os.RemoveAll("media.db")
-	os.RemoveAll("faces.db")
+	// os.RemoveAll("media.db")
+	// os.RemoveAll("faces.db")
 	os.RemoveAll("orkisMediaGallery.db")
 
 	// clearDb()
@@ -932,7 +932,7 @@ func processNewFilesInBkgrnd() {
 			return
 		}
 
-		if processedFilesCounter > 0 { //  || true { // do clustring anyway
+		if processedFilesCounter > 0 { //} || true { // do clustring anyway
 			// run clustering
 			doPythonClustering()
 			fmt.Println("preparing faces thumbnails")

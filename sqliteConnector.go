@@ -819,7 +819,7 @@ func getOneImagePerPerson(db *sql.DB) ([]Face, error) {
 	return faces, nil
 }
 
-func getOneImagePerPersonWithoutPersonsTable(db *sql.DB) ([]Face, error) {
+func getOneImagePerPersonWithoutPersonsTableWithoutProgressPrint(db *sql.DB) ([]Face, error) {
 
 	var faces []Face
 	var personID int
@@ -884,6 +884,98 @@ func getOneImagePerPersonWithoutPersonsTable(db *sql.DB) ([]Face, error) {
 			PersonID:   strconv.Itoa(personID),
 			MediaCount: strconv.Itoa(mediaCount),
 		})
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error encountered while iterating rows: %v", err)
+	}
+
+	return faces, nil
+}
+
+func getOneImagePerPersonWithoutPersonsTable(db *sql.DB) ([]Face, error) {
+	var faces []Face
+	var personID int
+	var absoluteFilePath string
+	var facialAreaJSON string
+	var mediaType string
+	var videoFrameNumber int
+	var mediaCount int
+
+	// Count total rows to display progress
+	countQuery := `
+		SELECT COUNT(DISTINCT personID) 
+		FROM faceEmbeddings;
+	`
+	var totalRows int
+	err := db.QueryRow(countQuery).Scan(&totalRows)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to count rows: %v", err)
+	}
+
+	// Main query to get the data
+	query := `
+		SELECT 
+			fe.personID,
+			m.absoluteFilePath,
+			fe.facial_area,
+			m.mediaType,
+			fe.videoFrameNumber,
+			COUNT(DISTINCT fe.mediaID) AS mediaCount
+		FROM 
+			faceEmbeddings fe
+		JOIN 
+			mediaItems m ON fe.mediaID = m.mediaID
+		GROUP BY 
+			fe.personID
+		ORDER BY 
+			mediaCount DESC;
+	`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query database: %v", err)
+	}
+	defer rows.Close()
+
+	// Initialize a counter for progress tracking
+	currentRow := 0
+
+	for rows.Next() {
+		if err := rows.Scan(&personID, &absoluteFilePath, &facialAreaJSON, &mediaType, &videoFrameNumber, &mediaCount); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %v", err)
+		}
+
+		var img gocv.Mat
+		if mediaType == "image" {
+			img = gocv.IMRead(absoluteFilePath, gocv.IMReadColor)
+			if img.Empty() {
+				return nil, fmt.Errorf("failed to read image from path %s", absoluteFilePath)
+			}
+		} else if mediaType == "video" {
+			img, err = getImageFromVideoPath(absoluteFilePath, videoFrameNumber)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get image from video at path %s, frame %d: %v", absoluteFilePath, videoFrameNumber, err)
+			}
+		}
+
+		defer img.Close()
+		face, err := getFaceImagesBase64FromImage(img, facialAreaJSON)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get face image data for personID %d: %v", personID, err)
+		}
+
+		faces = append(faces, Face{
+			ImageData:  face,
+			PersonID:   strconv.Itoa(personID),
+			MediaCount: strconv.Itoa(mediaCount),
+		})
+
+		// Update progress
+		currentRow++
+		progress := float64(currentRow) / float64(totalRows) * 100
+		fmt.Printf("Progress: %.2f%% (%d/%d)\n", progress, currentRow, totalRows)
 	}
 
 	if err = rows.Err(); err != nil {

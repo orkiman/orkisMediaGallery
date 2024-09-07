@@ -326,7 +326,7 @@ import networkx as nx
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 
-def chinese_whispers_fixed_iterations(embeddings, threshold=0.5, iterations=20):
+def chinese_whispers_fixed_iterations_old(embeddings, threshold=0.5, iterations=20):
 
     # Step 0: Normalize the embeddings
     # normalized_embeddings = [embedding / np.linalg.norm(embedding) for embedding in embeddings]
@@ -365,6 +365,75 @@ def chinese_whispers_fixed_iterations(embeddings, threshold=0.5, iterations=20):
             # Assign the most frequent label to the current node
             most_frequent_label = max(set(labels), key=labels.count)
             G.nodes[node]['label'] = most_frequent_label
+
+    # Step 5: Extract clusters
+    clusters = {}
+    for node in G.nodes():
+        label = G.nodes[node]['label']
+        if label not in clusters:
+            clusters[label] = []
+        clusters[label].append(node)
+
+    return list(clusters.values())
+
+def chinese_whispers_max_iterations(embeddings, threshold=0.5, iterations=20, safety_zone=3):
+    # Step 0: Normalize the embeddings
+    embeddings = [embedding / np.linalg.norm(embedding) for embedding in embeddings]
+    
+    # Step 1: Construct the graph
+    G = nx.Graph()
+
+    for i, embedding in enumerate(embeddings):
+        G.add_node(i)
+
+    # Step 2: Add edges based on similarity
+    similarity_matrix = cosine_similarity(embeddings)
+    
+    for i in range(len(embeddings)):
+        for j in range(i + 1, len(embeddings)):
+            if similarity_matrix[i, j] > threshold:
+                G.add_edge(i, j, weight=similarity_matrix[i, j])
+
+    # Step 3: Initialize labels
+    for node in G.nodes():
+        G.nodes[node]['label'] = node
+
+    unchanged_iterations = 0  # Counter for unchanged iterations
+    prev_labels = None  # Variable to store previous labels
+
+    # Step 4: Run the Chinese Whispers algorithm
+    for iteration in range(iterations):
+        nodes = list(G.nodes())
+        np.random.shuffle(nodes)
+        
+        for node in nodes:
+            neighbors = G[node]
+            if not neighbors:
+                continue
+            
+            # Get the labels of the neighbors
+            labels = [G.nodes[neighbor]['label'] for neighbor in neighbors]
+            # Assign the most frequent label to the current node
+            most_frequent_label = max(set(labels), key=labels.count)
+            G.nodes[node]['label'] = most_frequent_label
+
+        # Collect current labels
+        current_labels = [G.nodes[node]['label'] for node in G.nodes()]
+        
+        # Compare with previous labels to check if unchanged
+        if prev_labels is not None and current_labels == prev_labels:
+            unchanged_iterations += 1
+        else:
+            unchanged_iterations = 0  # Reset counter if labels changed
+
+        prev_labels = current_labels.copy()  # Save current labels for next comparison
+        
+        print(f"Iteration {iteration + 1}: Unchanged for {unchanged_iterations} iterations")
+
+        # Exit if unchanged for safety zone iterations
+        if unchanged_iterations >= safety_zone:
+            print(f"Stopping early at iteration {iteration + 1} after {unchanged_iterations} unchanged iterations.")
+            break
 
     # Step 5: Extract clusters
     clusters = {}
@@ -448,18 +517,23 @@ def chinese_whispers(embeddings, threshold=0.5, max_iterations=100, stability_ch
 # print(f"Number of clusters: {len(clusters)}")
 
 def prepareAndClusterChineseWhispers(conn, cursor):
-    cursor.execute("SELECT * FROM faceEmbeddings")
+    cursor.execute("SELECT embedding, embeddingID FROM faceEmbeddings")
     faceEmbeddings_rows = cursor.fetchall()
     embeddings = []
+    embeddingIDs = []
     for faceEmbeddings_row in faceEmbeddings_rows:
         # embeddingID = faceEmbeddings_row["embeddingID"]
         # Deserialize the stored binary data back into a numpy array
         serialized_face_embedding = faceEmbeddings_row["embedding"]
         face_embedding = np.frombuffer(serialized_face_embedding, dtype=np.float64)
         embeddings.append(face_embedding)
+        embeddingIDs.append(faceEmbeddings_row["embeddingID"])
 
     # clusters = chinese_whispers(embeddings, threshold=0.41, max_iterations=100)
-    clusters = chinese_whispers_fixed_iterations(embeddings, threshold=0.41, iterations=50)
+    clusters = chinese_whispers_max_iterations(embeddings, threshold=0.6)#0.41
+    # total_items_in_clusters = sum(len(cluster) for cluster in clusters)
+    # print(f"Total items in all clusters: {total_items_in_clusters}")
+    
     print(f"Number of clusters: {len(clusters)}")
     personID = 0
     for cluster in clusters:
@@ -467,21 +541,18 @@ def prepareAndClusterChineseWhispers(conn, cursor):
         if not cluster:
             continue  # Skip empty clusters
 
-        # # updateDatabase
-        # cursor.execute("INSERT INTO PERSONS (faceSampleEmbeddingID) VALUES (?)", (faceEmbeddings_rows[0]["embeddingID"],))                        
-        # personID = cursor.lastrowid 
-        
-        # Convert the cluster list to a tuple
+        # For single-item clusters
         if len(cluster) == 1:
-            cluster_str = f"({cluster[0]})"  # Handle single-item clusters correctly
+            cluster_str = f"({embeddingIDs[cluster[0]]})"
         else:
-            cluster_str = str(tuple(cluster))    
-          
+            # Use list comprehension to convert cluster indices to embeddingIDs and join them as a string for the SQL query
+            cluster_str = str(tuple(embeddingIDs[i] for i in cluster))
+
         # Debugging output to check the generated SQL query
         # print(f"UPDATE faceEmbeddings SET personID = ? WHERE embeddingID IN {cluster_str}", (personID,))
         
         # Execute the SQL UPDATE statement
-        cursor.execute(f"UPDATE faceEmbeddings SET personID = ? WHERE embeddingID -1 IN {cluster_str}", (personID,))
+        cursor.execute(f"UPDATE faceEmbeddings SET personID = ? WHERE embeddingID IN {cluster_str}", (personID,))
 
         personID += 1
         
