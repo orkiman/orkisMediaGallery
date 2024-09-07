@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"database/sql"
+	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -313,7 +314,8 @@ func handleRootDirectoryRequests(w http.ResponseWriter, r *http.Request) {
 
 func processFacesTemplate(w http.ResponseWriter, r *http.Request) {
 
-	faces, err := getOneImagePerPersonWithoutPersonsTable(db)
+	// faces, err := getOneImagePerPersonWithoutPersonsTable(db)
+	faces, err := loadFacesFromBinaryFile("faces.bin")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -332,6 +334,42 @@ func processFacesTemplate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+}
+
+// Save faces[] as a binary file
+func saveFacesToBinaryFile(faces []Face, filePath string) error {
+	file, err := os.Create(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %v", err)
+	}
+	defer file.Close()
+
+	encoder := gob.NewEncoder(file)
+	err = encoder.Encode(faces)
+	if err != nil {
+		return fmt.Errorf("failed to encode faces: %v", err)
+	}
+
+	return nil
+}
+
+// Load faces[] from a binary file
+func loadFacesFromBinaryFile(filePath string) ([]Face, error) {
+	var faces []Face
+
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file: %v", err)
+	}
+	defer file.Close()
+
+	decoder := gob.NewDecoder(file)
+	err = decoder.Decode(&faces)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode faces: %v", err)
+	}
+
+	return faces, nil
 }
 
 func handleProcessSelected(w http.ResponseWriter, r *http.Request) {
@@ -840,27 +878,6 @@ func getExifNameValueMap(filePath string, tagNames []string) (map[string]string,
 	return result, nil
 }
 
-// func doPythonClustering() {
-// 	log.Println("Python clustering script starting")
-
-// 	cmd := exec.Command("/home/orkiman/vscodeProjects/go/orkisMediaGallery/myDeepFaceVenv/bin/python3", "face_grouping.py")
-
-// 	if err := cmd.Start(); err != nil {
-// 		log.Fatal(err)
-// 	}
-
-// 	// Do other work in Go while the script runs
-
-// 	go func() { // Wait for the script to finish
-// 		err := cmd.Wait()
-// 		log.Println("Python clustering script finished")
-// 		if err != nil {
-// 			log.Fatalf("Python script finished with error: %v", err)
-// 		}
-// 	}()
-
-// }
-
 func doPythonClustering() {
 	log.Println("Python clustering script starting")
 
@@ -918,6 +935,14 @@ func processNewFilesInBkgrnd() {
 		if processedFilesCounter > 0 { //  || true { // do clustring anyway
 			// run clustering
 			doPythonClustering()
+			fmt.Println("preparing faces thumbnails")
+			faces := getOneImagePerPersonWithoutPersonsTable()
+			err := saveFacesToBinaryFile(faces, "faces.bin")
+			if err != nil {
+				log.Error("Error:", err)
+				return
+			}
+			fmt.Println("faces thumbnails ready ")
 		}
 
 		printDatabaseLength(db)
