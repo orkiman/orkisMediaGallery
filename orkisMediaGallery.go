@@ -914,6 +914,7 @@ func doPythonClustering() {
 	}()
 
 	// Wait for the command to finish in a separate goroutine
+
 	go func() {
 		err := cmd.Wait()
 		if err != nil {
@@ -921,6 +922,15 @@ func doPythonClustering() {
 		} else {
 			log.Println("Python clustering script finished successfully")
 		}
+
+		fmt.Println("preparing faces thumbnails")
+		faces := getOneImagePerPersonWithoutPersonsTable()
+		err := saveFacesToBinaryFile(faces, "faces.bin")
+		if err != nil {
+			log.Error("Error:", err)
+			return
+		}
+		fmt.Println("faces thumbnails ready:) ")
 	}()
 
 }
@@ -935,14 +945,6 @@ func processNewFilesInBkgrnd() {
 		if processedFilesCounter > 0 { //} || true { // do clustring anyway
 			// run clustering
 			doPythonClustering()
-			fmt.Println("preparing faces thumbnails")
-			faces := getOneImagePerPersonWithoutPersonsTable()
-			err := saveFacesToBinaryFile(faces, "faces.bin")
-			if err != nil {
-				log.Error("Error:", err)
-				return
-			}
-			fmt.Println("faces thumbnails ready ")
 		}
 
 		printDatabaseLength(db)
