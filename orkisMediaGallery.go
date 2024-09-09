@@ -315,7 +315,7 @@ func handleRootDirectoryRequests(w http.ResponseWriter, r *http.Request) {
 func processFacesTemplate(w http.ResponseWriter, r *http.Request) {
 
 	// faces, err := getOneImagePerPersonWithoutPersonsTable(db)
-	faces, err := loadFacesFromBinaryFile("faces.bin")
+	faces, err := getFacesFromDb(db)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -337,21 +337,21 @@ func processFacesTemplate(w http.ResponseWriter, r *http.Request) {
 }
 
 // Save faces[] as a binary file
-func saveFacesToBinaryFile(faces []Face, filePath string) error {
-	file, err := os.Create(filePath)
-	if err != nil {
-		return fmt.Errorf("failed to create file: %v", err)
-	}
-	defer file.Close()
+// func saveFacesToBinaryFile(faces []Face, filePath string) error {
+// 	file, err := os.Create(filePath)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to create file: %v", err)
+// 	}
+// 	defer file.Close()
 
-	encoder := gob.NewEncoder(file)
-	err = encoder.Encode(faces)
-	if err != nil {
-		return fmt.Errorf("failed to encode faces: %v", err)
-	}
+// 	encoder := gob.NewEncoder(file)
+// 	err = encoder.Encode(faces)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to encode faces: %v", err)
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
 
 // Load faces[] from a binary file
 func loadFacesFromBinaryFile(filePath string) ([]Face, error) {
@@ -923,14 +923,17 @@ func doPythonClustering() {
 			log.Println("Python clustering script finished successfully")
 		}
 
-		fmt.Println("preparing faces thumbnails")
-		faces := getOneImagePerPersonWithoutPersonsTable()
-		err := saveFacesToBinaryFile(faces, "faces.bin")
-		if err != nil {
-			log.Error("Error:", err)
-			return
-		}
-		fmt.Println("faces thumbnails ready:) ")
+		// fmt.Println("preparing faces thumbnails")
+		// faces, err := getOneImagePerPersonWithoutPersonsTable(db)
+		// if err != nil {
+		// 	log.Fatal("Error:", err)
+		// }
+		// err = saveFacesToBinaryFile(faces, "faces.bin")
+		// if err != nil {
+		// 	log.Fatal("Error:", err)
+		// 	return
+		// }
+		// fmt.Println("faces thumbnails ready:) ")
 	}()
 
 }
@@ -942,7 +945,7 @@ func processNewFilesInBkgrnd() {
 			return
 		}
 
-		if processedFilesCounter > 0 { //} || true { // do clustring anyway
+		if processedFilesCounter > 0 { // || true { // do clustring anyway
 			// run clustering
 			doPythonClustering()
 		}

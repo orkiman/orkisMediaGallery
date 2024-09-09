@@ -695,6 +695,38 @@ func getFaceImagesBase64FromImage(img gocv.Mat, facialAreaJSON string) (string, 
 	return imgBase64Str, nil
 }
 
+func getFacesFromDb(db *sql.DB) ([]Face, error) {
+	var faces []Face
+	rows, err := db.Query("SELECT personID, faceImage, mediaCount FROM faceImages")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query faces: %v", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var face Face
+		var faceImageBlob []byte
+
+		// Scan the rows into Face struct fields
+		err := rows.Scan(&face.PersonID, &faceImageBlob, &face.MediaCount)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan row: %v", err)
+		}
+
+		// Convert the image BLOB to a Base64 string
+		face.ImageData = base64.StdEncoding.EncodeToString(faceImageBlob)
+
+		faces = append(faces, face)
+	}
+
+	// Check for errors during row iteration
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error encountered while iterating rows: %v", err)
+	}
+
+	return faces, nil
+}
+
 func getImageFromVideoPathOld(videoPath string, frameNUmber int) (gocv.Mat, error) {
 
 	// Open the video file
@@ -743,7 +775,7 @@ type Face struct {
 	MediaCount string
 }
 
-func getOneImagePerPerson(db *sql.DB) ([]Face, error) {
+func getOneImagePerPersonOld(db *sql.DB) ([]Face, error) {
 
 	var faces []Face
 	var personID int
@@ -975,7 +1007,8 @@ func getOneImagePerPersonWithoutPersonsTable(db *sql.DB) ([]Face, error) {
 		// Update progress
 		currentRow++
 		progress := float64(currentRow) / float64(totalRows) * 100
-		fmt.Printf("Progress: %.2f%% (%d/%d)\n", progress, currentRow, totalRows)
+		fileName := filepath.Base(absoluteFilePath)
+		fmt.Printf("Progress: %.2f%% (%d/%d) mediaType: %s,fileName: %s\n", progress, currentRow, totalRows, mediaType, fileName)
 	}
 
 	if err = rows.Err(); err != nil {
