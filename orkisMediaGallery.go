@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -176,13 +177,18 @@ func deleteAll() {
 }
 
 func handleRootDirectoryRequests(w http.ResponseWriter, r *http.Request) {
-	smiley := r.URL.Path
-	if smiley == "/smiley.png" {
+	if r.URL.Path == "/smiley.png" {
 		http.ServeFile(w, r, "smiley.png")
 		return
 	}
-	path := filepath.Join(mediaDir, r.URL.Path)
-	info, err := os.Stat(path)
+
+	cleanURLPath := path.Clean(r.URL.Path)
+	if cleanURLPath == "." {
+		cleanURLPath = "/"
+	}
+	relURLPath := strings.TrimPrefix(cleanURLPath, "/")
+	fileSystemPath := filepath.Join(mediaDir, relURLPath)
+	info, err := os.Stat(fileSystemPath)
 	if os.IsNotExist(err) {
 		http.NotFound(w, r)
 		return
@@ -261,7 +267,7 @@ func handleRootDirectoryRequests(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 
-		files, err := os.ReadDir(filepath.Dir(path))
+		files, err := os.ReadDir(filepath.Dir(fileSystemPath))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -269,10 +275,14 @@ func handleRootDirectoryRequests(w http.ResponseWriter, r *http.Request) {
 
 		var currentIndex, totalImages int
 		var prevPath, nextPath string
+		dirURLPath := path.Dir(cleanURLPath)
+		if dirURLPath == "." {
+			dirURLPath = "/"
+		}
 
 		for i, file := range files {
 			// if isImage(file.Name()) {
-			if filepath.Base(path) == file.Name() {
+			if filepath.Base(fileSystemPath) == file.Name() {
 				currentIndex = i
 			}
 			totalImages++
@@ -282,8 +292,8 @@ func handleRootDirectoryRequests(w http.ResponseWriter, r *http.Request) {
 		if totalImages > 1 {
 			prevIndex := (currentIndex - 1 + totalImages) % totalImages
 			nextIndex := (currentIndex + 1) % totalImages
-			prevPath = filepath.Join(filepath.Dir(r.URL.Path), files[prevIndex].Name())
-			nextPath = filepath.Join(filepath.Dir(r.URL.Path), files[nextIndex].Name())
+			prevPath = path.Join("/", strings.TrimPrefix(dirURLPath, "/"), files[prevIndex].Name())
+			nextPath = path.Join("/", strings.TrimPrefix(dirURLPath, "/"), files[nextIndex].Name())
 		}
 
 		data := struct {
@@ -291,12 +301,12 @@ func handleRootDirectoryRequests(w http.ResponseWriter, r *http.Request) {
 			PrevPath  string
 			NextPath  string
 		}{
-			ImagePath: filepath.Join("media", r.URL.Path),
+			ImagePath: path.Join("/media", relURLPath),
 			PrevPath:  prevPath,
 			NextPath:  nextPath,
 		}
 		var tmplFile string
-		if isImage(path) {
+		if isImage(fileSystemPath) {
 			tmplFile = "imageTemplate.html"
 		} else {
 			tmplFile = "videoTemplate.html"
