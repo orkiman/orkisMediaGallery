@@ -51,8 +51,12 @@ const mediaDir = rootDir + "/media"
 const duplicatesDir = rootDir + "/duplicated"
 const binDir = rootDir + "/bin"
 
-const certFile = "/etc/mygoapp/certs/fullchain.pem" //"cert.pem"
-const keyFile = "/etc/mygoapp/certs/privkey.pem"    //"key.pem"
+// const certFile = "/etc/mygoapp/certs/fullchain.pem" //"cert.pem"
+// const keyFile = "/etc/mygoapp/certs/privkey.pem"    //"key.pem"
+
+const certFile = "/etc/letsencrypt/live/orkiman.v6.rocks/fullchain.pem"
+const keyFile = "/etc/letsencrypt/live/orkiman.v6.rocks/privkey.pem"
+
 // const certFile = "/home/spot/ssl_certs/fullchain.pem" //"cert.pem"
 // const keyFile = "/home/spot/ssl_certs/privkey.pem"    //"key.pem"
 
@@ -68,7 +72,7 @@ func init() {
 	credFile := filepath.Join(".", "staticFiles/.login_credentials.json")
 	file, err := os.Open(credFile)
 	if err != nil {
-		panic("Could not open credentials file")
+		panic(fmt.Errorf("Could not open credentials file: %w", err))
 	}
 	defer file.Close()
 

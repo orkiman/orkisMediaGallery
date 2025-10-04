@@ -1,0 +1,41 @@
+Instructions for Managing orkisMediaGallery with systemd
+1. Starting and Stopping the Application
+Start the application:
+
+bash
+Copy code
+sudo systemctl start orkisMediaGallery
+Stop the application:
+
+bash
+Copy code
+sudo systemctl stop orkisMediaGallery
+Restart the application (use this after making code changes):
+
+bash
+Copy code
+sudo systemctl restart orkisMediaGallery
+Check the status of the application:
+
+bash
+Copy code
+sudo systemctl status orkisMediaGallery
+2. Updating the Application After Code Changes
+Compile the updated code: Navigate to your project directory and compile:
+
+bash
+Copy code
+cd /home/orkiman/vscodeProjects/go/orkisMediaGallery
+go build -o orkisMediaGallery
+Restart the service to apply the new build:
+
+bash
+Copy code
+sudo systemctl restart orkisMediaGallery
+3. Checking Logs for Debugging
+View the application logs:
+bash
+Copy code
+sudo journalctl -u orkisMediaGallery
+4. Automatic Startup on Boot
+The service is configured to start automatically on boot, so there’s no need to manually start it each time the system reboots.
