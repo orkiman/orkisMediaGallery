@@ -43,7 +43,7 @@ type processSelectedRequest struct {
 	SelectedAction string   `json:"selectedAction"`
 }
 
-const rootDir = "/home/orkiman/Pictures/myPhotosTest"
+const rootDir = "/home/orkiman/Pictures/orkisMediaGallery"
 const thumbnailDir = rootDir + "/thumbnails"
 const heicDir = rootDir + "/heic"
 const uploadDir = rootDir + "/upload"
@@ -143,8 +143,8 @@ func main() {
 	encripted := true
 	if encripted {
 		// for production:
-		fmt.Println("Server starting on port 8443...")
-		err = http.ListenAndServeTLS(":8443", certFile, keyFile, nil)
+		fmt.Println("Server starting on port 443...")
+		err = http.ListenAndServeTLS(":443", certFile, keyFile, nil)
 		fmt.Println("after ListenAndServeTLS")
 		if err != nil {
 			fmt.Println("Failed to start server:", err)
