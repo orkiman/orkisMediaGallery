@@ -201,13 +201,16 @@ func handleRootDirectoryRequests(w http.ResponseWriter, r *http.Request) {
 		// Parse query parameters
 		page := parseQueryParam(r, "page", 1)
 		pageSize := parseQueryParam(r, "pageSize", 2000)
-		sortBy := r.URL.Query().Get("sortBy")
+		sortBy := strings.ToLower(r.URL.Query().Get("sortBy"))
 		if sortBy == "" {
-			sortBy = "name"
+			sortBy = "date"
 		}
-		sortOrder := r.URL.Query().Get("sortOrder")
+		sortOrder := strings.ToLower(r.URL.Query().Get("sortOrder"))
 		if sortOrder == "" {
-			sortOrder = "ASC"
+			sortOrder = "desc"
+		}
+		if sortOrder != "desc" {
+			sortOrder = "asc"
 		}
 		filterBy := r.URL.Query().Get("filterBy")
 
@@ -249,7 +252,7 @@ func handleRootDirectoryRequests(w http.ResponseWriter, r *http.Request) {
 			NextPage:    nextPage,
 			Pages:       pages,
 			SortBy:      sortBy,
-			SortOrder:   sortOrder,
+			SortOrder:   strings.ToUpper(sortOrder),
 			FilterBy:    filterBy,
 		}
 
